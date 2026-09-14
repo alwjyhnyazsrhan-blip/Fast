@@ -89,6 +89,8 @@ class RenderApiClient(private val context: Context) {
         storeName: String,
         distanceKm: Double,
         payoutSar: Double,
+        orderId: String? = null,
+        customerDistrict: String? = null,
         driverLat: Double? = null,
         driverLng: Double? = null
     ): Result<EvaluationResponse> = withContext(Dispatchers.IO) {
@@ -99,6 +101,12 @@ class RenderApiClient(private val context: Context) {
                 put("storeName", storeName)
                 put("distanceKm", distanceKm)
                 put("payoutSar", payoutSar)
+                if (!orderId.isNullOrBlank()) {
+                    put("orderId", orderId)
+                }
+                if (!customerDistrict.isNullOrBlank()) {
+                    put("customerDistrict", customerDistrict)
+                }
                 if (driverLat != null && driverLng != null) {
                     put("driverCoordinates", JSONObject().apply {
                         put("lat", driverLat)
