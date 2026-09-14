@@ -303,17 +303,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun testServerPing() {
+        Toast.makeText(this@MainActivity, "جاري فحص الاتصال بسيرفر Render...", Toast.LENGTH_SHORT).show()
         lifecycleScope.launch {
-            val success = withContext(Dispatchers.IO) {
-                renderClient.updateDriverLocation(
-                    LocationTrackingService.currentLatitude ?: 24.7136,
-                    LocationTrackingService.currentLongitude ?: 46.6753
-                )
-            }
-            if (success) {
-                Toast.makeText(this@MainActivity, "تم الاتصال بسيرفر Render بنجاح!", Toast.LENGTH_SHORT).show()
+            val pingResult = renderClient.pingServer()
+            if (pingResult.isSuccess) {
+                // أيضاً نقوم بتحديث موقع المندوب الحي إن توفر
+                val lat = LocationTrackingService.currentLatitude
+                val lng = LocationTrackingService.currentLongitude
+                if (lat != null && lng != null) {
+                    renderClient.updateDriverLocation(lat, lng)
+                }
+                Toast.makeText(
+                    this@MainActivity,
+                    "✅ تم الاتصال بنجاح! (${pingResult.getOrNull()})",
+                    Toast.LENGTH_LONG
+                ).show()
             } else {
-                Toast.makeText(this@MainActivity, "فشل الاتصال: تحقق من رابط السيرفر المكتوب", Toast.LENGTH_LONG).show()
+                val errorMsg = pingResult.exceptionOrNull()?.message ?: "خطأ غير معروف"
+                Toast.makeText(
+                    this@MainActivity,
+                    "❌ فشل الاتصال: $errorMsg",
+                    Toast.LENGTH_LONG
+                ).show()
             }
         }
     }

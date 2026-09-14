@@ -69,7 +69,7 @@ async function startServer() {
   // ==========================================
   // 1. HEALTH & SYSTEM DIAGNOSTICS
   // ==========================================
-  app.get("/api/health", (_req: Request, res: Response) => {
+  app.get(["/api/health", "/api/ping"], (_req: Request, res: Response) => {
     res.json({
       status: "online",
       service: "Locate Go Backend Server",
@@ -150,7 +150,7 @@ async function startServer() {
   // ==========================================
   // 5. UPDATE DRIVER'S REAL LIVE GPS LOCATION
   // ==========================================
-  app.post("/api/location", (req: Request, res: Response) => {
+  app.post(["/api/location", "/api/driver/location"], (req: Request, res: Response) => {
     const { lat, lng, accuracy } = req.body;
 
     if (typeof lat !== "number" || typeof lng !== "number") {

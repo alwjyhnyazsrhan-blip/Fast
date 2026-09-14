@@ -21,17 +21,20 @@ class RenderApiClient(private val context: Context) {
     private val prefs = context.getSharedPreferences("locate_go_prefs", Context.MODE_PRIVATE)
 
     var baseUrl: String
-        get() = prefs.getString("render_url", "https://your-locate-go.onrender.com") ?: "https://your-locate-go.onrender.com"
+        get() = prefs.getString("render_url", "https://fast-34v4.onrender.com") ?: "https://fast-34v4.onrender.com"
         set(value) {
-            val clean = value.trim().removeSuffix("/")
+            var clean = value.trim().removeSuffix("/")
+            if (!clean.startsWith("http://") && !clean.startsWith("https://") && clean.isNotEmpty()) {
+                clean = "https://$clean"
+            }
             prefs.edit().putString("render_url", clean).apply()
         }
 
     private val httpClient = OkHttpClient.Builder()
         .connectionPool(ConnectionPool(8, 5, TimeUnit.MINUTES))
-        .connectTimeout(1500, TimeUnit.MILLISECONDS)
-        .readTimeout(2500, TimeUnit.MILLISECONDS)
-        .writeTimeout(1500, TimeUnit.MILLISECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
 
@@ -42,6 +45,38 @@ class RenderApiClient(private val context: Context) {
         val maxAllowedKm: Double,
         val rejectionReason: String? = null
     )
+
+    /**
+     * فحص الاتصال بالخادم والتحقق من حالته وسرعة الاستجابة
+     */
+    suspend fun pingServer(): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val url = baseUrl.trim().removeSuffix("/")
+            val request = Request.Builder()
+                .url("$url/api/health")
+                .get()
+                .header("Connection", "Keep-Alive")
+                .header("User-Agent", "LocateGo-Android/1.0")
+                .build()
+
+            val start = System.currentTimeMillis()
+            httpClient.newCall(request).execute().use { response ->
+                val elapsed = System.currentTimeMillis() - start
+                if (response.isSuccessful) {
+                    Result.success("تم بنجاح (${elapsed}ms)")
+                } else {
+                    Result.failure(Exception("كود السيرفر: HTTP ${response.code}"))
+                }
+            }
+        } catch (e: Exception) {
+            val msg = when (e) {
+                is java.net.SocketTimeoutException -> "انتهت مهلة الاتصال (Timeout)"
+                is java.net.UnknownHostException -> "تعذر الوصول للرابط (DNS غير موجود)"
+                else -> e.localizedMessage ?: "خطأ في الشبكة"
+            }
+            Result.failure(Exception(msg))
+        }
+    }
 
     /**
      * إرسال طلب جديد لتقييم المسافة وسعر التوصيل لحظياً
@@ -55,6 +90,7 @@ class RenderApiClient(private val context: Context) {
         driverLng: Double? = null
     ): Result<EvaluationResponse> = withContext(Dispatchers.IO) {
         try {
+            val url = baseUrl.trim().removeSuffix("/")
             val json = JSONObject().apply {
                 put("appName", appName)
                 put("storeName", storeName)
@@ -70,7 +106,7 @@ class RenderApiClient(private val context: Context) {
 
             val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
             val request = Request.Builder()
-                .url("\$baseUrl/api/orders/evaluate")
+                .url("$url/api/orders/evaluate")
                 .post(body)
                 .header("Connection", "Keep-Alive")
                 .header("User-Agent", "LocateGo-Android/1.0")
@@ -78,7 +114,7 @@ class RenderApiClient(private val context: Context) {
 
             httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    return@withContext Result.failure(Exception("HTTP \${response.code}"))
+                    return@withContext Result.failure(Exception("HTTP ${response.code}"))
                 }
 
                 val bodyStr = response.body?.string() ?: "{}"
@@ -97,7 +133,7 @@ class RenderApiClient(private val context: Context) {
                 )
             }
         } catch (e: Exception) {
-            Log.e("RenderApiClient", "Evaluation error: \${e.message}")
+            Log.e("RenderApiClient", "Evaluation error: ${e.message}")
             Result.failure(e)
         }
     }
@@ -107,19 +143,27 @@ class RenderApiClient(private val context: Context) {
      */
     suspend fun updateDriverLocation(lat: Double, lng: Double): Boolean = withContext(Dispatchers.IO) {
         try {
+            val url = baseUrl.trim().removeSuffix("/")
             val json = JSONObject().apply {
                 put("lat", lat)
                 put("lng", lng)
             }
             val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
             val request = Request.Builder()
-                .url("\$baseUrl/api/driver/location")
+                .url("$url/api/location")
                 .post(body)
                 .header("Connection", "Keep-Alive")
+                .header("User-Agent", "LocateGo-Android/1.0")
                 .build()
 
-            httpClient.newCall(request).execute().use { it.isSuccessful }
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.w("RenderApiClient", "Update location returned HTTP ${response.code}")
+                }
+                response.isSuccessful
+            }
         } catch (e: Exception) {
+            Log.e("RenderApiClient", "Failed to update driver location: ${e.message}")
             false
         }
     }

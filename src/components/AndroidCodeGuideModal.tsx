@@ -961,17 +961,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun testServerPing() {
+        Toast.makeText(this@MainActivity, "جاري فحص الاتصال بسيرفر Render...", Toast.LENGTH_SHORT).show()
         lifecycleScope.launch {
-            val success = withContext(Dispatchers.IO) {
-                renderClient.updateDriverLocation(
-                    LocationTrackingService.currentLatitude ?: 24.7136,
-                    LocationTrackingService.currentLongitude ?: 46.6753
-                )
-            }
-            if (success) {
-                Toast.makeText(this@MainActivity, "تم الاتصال بسيرفر Render بنجاح!", Toast.LENGTH_SHORT).show()
+            val pingResult = renderClient.pingServer()
+            if (pingResult.isSuccess) {
+                val lat = LocationTrackingService.currentLatitude
+                val lng = LocationTrackingService.currentLongitude
+                if (lat != null && lng != null) {
+                    renderClient.updateDriverLocation(lat, lng)
+                }
+                Toast.makeText(this@MainActivity, "✅ تم الاتصال بنجاح! (\${pingResult.getOrNull()})", Toast.LENGTH_LONG).show()
             } else {
-                Toast.makeText(this@MainActivity, "فشل الاتصال: تحقق من رابط السيرفر المكتوب", Toast.LENGTH_LONG).show()
+                val errorMsg = pingResult.exceptionOrNull()?.message ?: "خطأ غير معروف"
+                Toast.makeText(this@MainActivity, "❌ فشل الاتصال: \$errorMsg", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -1194,9 +1196,9 @@ class RenderApiClient(private val context: Context) {
 
     private val httpClient = OkHttpClient.Builder()
         .connectionPool(ConnectionPool(8, 5, TimeUnit.MINUTES))
-        .connectTimeout(1500, TimeUnit.MILLISECONDS)
-        .readTimeout(2500, TimeUnit.MILLISECONDS)
-        .writeTimeout(1500, TimeUnit.MILLISECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
 
@@ -1208,6 +1210,35 @@ class RenderApiClient(private val context: Context) {
         val rejectionReason: String? = null
     )
 
+    suspend fun pingServer(): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val url = baseUrl.trim().removeSuffix("/")
+            val request = Request.Builder()
+                .url("\$url/api/health")
+                .get()
+                .header("Connection", "Keep-Alive")
+                .header("User-Agent", "LocateGo-Android/1.0")
+                .build()
+
+            val start = System.currentTimeMillis()
+            httpClient.newCall(request).execute().use { response ->
+                val elapsed = System.currentTimeMillis() - start
+                if (response.isSuccessful) {
+                    Result.success("تم بنجاح (\${elapsed}ms)")
+                } else {
+                    Result.failure(Exception("كود السيرفر: HTTP \${response.code}"))
+                }
+            }
+        } catch (e: Exception) {
+            val msg = when (e) {
+                is java.net.SocketTimeoutException -> "انتهت مهلة الاتصال (Timeout)"
+                is java.net.UnknownHostException -> "تعذر الوصول للرابط (DNS غير موجود)"
+                else -> e.localizedMessage ?: "خطأ في الشبكة"
+            }
+            Result.failure(Exception(msg))
+        }
+    }
+
     suspend fun evaluateOrder(
         appName: String,
         storeName: String,
@@ -1217,6 +1248,7 @@ class RenderApiClient(private val context: Context) {
         driverLng: Double? = null
     ): Result<EvaluationResponse> = withContext(Dispatchers.IO) {
         try {
+            val url = baseUrl.trim().removeSuffix("/")
             val json = JSONObject().apply {
                 put("appName", appName)
                 put("storeName", storeName)
@@ -1232,7 +1264,7 @@ class RenderApiClient(private val context: Context) {
 
             val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
             val request = Request.Builder()
-                .url("\$baseUrl/api/orders/evaluate")
+                .url("\$url/api/orders/evaluate")
                 .post(body)
                 .header("Connection", "Keep-Alive")
                 .header("User-Agent", "LocateGo-Android/1.0")
@@ -1266,19 +1298,27 @@ class RenderApiClient(private val context: Context) {
 
     suspend fun updateDriverLocation(lat: Double, lng: Double): Boolean = withContext(Dispatchers.IO) {
         try {
+            val url = baseUrl.trim().removeSuffix("/")
             val json = JSONObject().apply {
                 put("lat", lat)
                 put("lng", lng)
             }
             val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
             val request = Request.Builder()
-                .url("\$baseUrl/api/driver/location")
+                .url("\$url/api/location")
                 .post(body)
                 .header("Connection", "Keep-Alive")
+                .header("User-Agent", "LocateGo-Android/1.0")
                 .build()
 
-            httpClient.newCall(request).execute().use { it.isSuccessful }
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.w("RenderApiClient", "Update location returned HTTP \${response.code}")
+                }
+                response.isSuccessful
+            }
         } catch (e: Exception) {
+            Log.e("RenderApiClient", "Failed to update location: \${e.message}")
             false
         }
     }
