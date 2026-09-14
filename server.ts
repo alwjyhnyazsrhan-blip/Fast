@@ -87,7 +87,8 @@ async function startServer() {
       status: "online",
       success: true,
       ping: "pong",
-      service: "Locate Go Backend Server",
+      service: "Locate Go Backend",
+      server: "locate",
       message: "سيرفر Locate Go متصل وجاهز لاستقبال وفحص الطلبات",
       timestamp: new Date().toISOString(),
       uptimeSeconds: Math.floor(process.uptime()),
@@ -101,6 +102,10 @@ async function startServer() {
   app.post("/api/health", handleHealthAndPing);
   app.get("/api/ping", handleHealthAndPing);
   app.post("/api/ping", handleHealthAndPing);
+  app.get("/health", handleHealthAndPing);
+  app.post("/health", handleHealthAndPing);
+  app.get("/ping", handleHealthAndPing);
+  app.post("/ping", handleHealthAndPing);
 
   // ==========================================
   // 2. GET CURRENT SYSTEM STATUS & SETTINGS

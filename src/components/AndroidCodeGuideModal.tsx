@@ -494,7 +494,8 @@ class LocateGoAccessibilityService : AccessibilityService() {
 
                 if (isEvaluatingOrder.get()) continue
 
-                if (currentForegroundPackage == "Sa.lg.android.locate" || currentForegroundPackage == "sa.lg.android.locatcc") {
+                val curPkgLower = currentForegroundPackage.lowercase().trim()
+                if (curPkgLower == "sa.lg.android.locate" || curPkgLower == "sa.lg.android.locatcc") {
                     withContext(Dispatchers.Main) {
                         performSwipeDownToRefresh()
                     }
@@ -526,7 +527,11 @@ class LocateGoAccessibilityService : AccessibilityService() {
         if (event == null) return
 
         val packageName: String = event.packageName?.toString() ?: ""
-        if (packageName != "Sa.lg.android.locate" && packageName != "sa.lg.android.locatcc") {
+        val lowerPkg: String = packageName.lowercase().trim()
+        if (packageName != "Sa.lg.android.locate" &&
+            packageName != "sa.lg.android.locatcc" &&
+            lowerPkg != "sa.lg.android.locate" &&
+            lowerPkg != "sa.lg.android.locatcc") {
             return
         }
 
@@ -1305,6 +1310,17 @@ class RenderApiClient(private val context: Context) {
             var clean = value.trim()
                 .replace(Regex("[\\u200B-\\u200F\\uFEFF\\u00A0\\u202A-\\u202E\\s]"), "")
                 .removeSuffix("/")
+
+            val suffixesToRemove = listOf(
+                "/api/health", "/api/ping", "/api/status", "/api",
+                "/health", "/ping", "/status"
+            )
+            for (suffix in suffixesToRemove) {
+                if (clean.endsWith(suffix, ignoreCase = true)) {
+                    clean = clean.substring(0, clean.length - suffix.length).removeSuffix("/")
+                }
+            }
+
             if (!clean.startsWith("http://") && !clean.startsWith("https://") && clean.isNotEmpty()) {
                 clean = "https://$clean"
             }
@@ -1328,32 +1344,40 @@ class RenderApiClient(private val context: Context) {
     )
 
     suspend fun pingServer(): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val url = baseUrl.trim().removeSuffix("/")
-            val request = Request.Builder()
-                .url("\$url/api/health")
-                .get()
-                .header("Connection", "Keep-Alive")
-                .header("User-Agent", "LocateGo-Android/1.0")
-                .build()
+        val rootUrl = baseUrl.trim().removeSuffix("/")
+        val candidateEndpoints = listOf("/api/health", "/health", "/api/ping", "/ping")
+        var lastException: Exception? = null
 
-            val start = System.currentTimeMillis()
-            httpClient.newCall(request).execute().use { response ->
-                val elapsed = System.currentTimeMillis() - start
-                if (response.isSuccessful) {
-                    Result.success("تم بنجاح (\${elapsed}ms)")
-                } else {
-                    Result.failure(Exception("كود السيرفر: HTTP \${response.code}"))
+        for (endpoint in candidateEndpoints) {
+            try {
+                val request = Request.Builder()
+                    .url("\$rootUrl\$endpoint")
+                    .get()
+                    .header("Connection", "Keep-Alive")
+                    .header("Accept", "application/json")
+                    .header("User-Agent", "LocateGo-Android/1.0")
+                    .build()
+
+                val start = System.currentTimeMillis()
+                httpClient.newCall(request).execute().use { response ->
+                    val elapsed = System.currentTimeMillis() - start
+                    if (response.isSuccessful) {
+                        return@withContext Result.success("تم بنجاح (\${elapsed}ms)")
+                    } else if (response.code != 404) {
+                        return@withContext Result.failure(Exception("كود السيرفر: HTTP \${response.code}"))
+                    }
                 }
+            } catch (e: Exception) {
+                lastException = e
             }
-        } catch (e: Exception) {
-            val msg = when (e) {
-                is java.net.SocketTimeoutException -> "انتهت مهلة الاتصال (Timeout)"
-                is java.net.UnknownHostException -> "تعذر الوصول للرابط (DNS غير موجود)"
-                else -> e.localizedMessage ?: "خطأ في الشبكة"
-            }
-            Result.failure(Exception(msg))
         }
+
+        val msg = when (lastException) {
+            is java.net.SocketTimeoutException -> "انتهت مهلة الاتصال (Timeout)"
+            is java.net.UnknownHostException -> "تعذر الوصول للرابط (DNS غير موجود)"
+            else -> lastException?.localizedMessage ?: "خطأ في الشبكة"
+        }
+        Result.failure(Exception(msg))
     }
 
     suspend fun evaluateOrder(

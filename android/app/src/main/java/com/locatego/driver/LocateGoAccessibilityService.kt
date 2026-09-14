@@ -122,7 +122,8 @@ class LocateGoAccessibilityService : AccessibilityService() {
                 if (isEvaluatingOrder.get()) continue
 
                 // تنفيذ السحب فقط إذا كان التطبيق الحالي في الواجهة هو أحد التطبيقين المستهدفين
-                if (currentForegroundPackage == "Sa.lg.android.locate" || currentForegroundPackage == "sa.lg.android.locatcc") {
+                val curPkgLower = currentForegroundPackage.lowercase().trim()
+                if (curPkgLower == "sa.lg.android.locate" || curPkgLower == "sa.lg.android.locatcc") {
                     withContext(Dispatchers.Main) {
                         performSwipeDownToRefresh()
                     }
@@ -157,7 +158,11 @@ class LocateGoAccessibilityService : AccessibilityService() {
         if (event == null) return
 
         val packageName: String = event.packageName?.toString() ?: ""
-        if (packageName != "Sa.lg.android.locate" && packageName != "sa.lg.android.locatcc") {
+        val lowerPkg: String = packageName.lowercase().trim()
+        if (packageName != "Sa.lg.android.locate" &&
+            packageName != "sa.lg.android.locatcc" &&
+            lowerPkg != "sa.lg.android.locate" &&
+            lowerPkg != "sa.lg.android.locatcc") {
             return
         }
 
