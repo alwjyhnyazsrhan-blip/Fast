@@ -50,6 +50,14 @@ function calculateHaversineDistanceKm(lat1, lon1, lat2, lon2) {
   return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 10) / 10;
 }
 
+// فحص اتصال الأندرويد واختبار السيرفر
+app.get(["/api/health", "/api/ping"], (req, res) => {
+  res.json({ status: "online", ping: "pong", service: "Locate Go Backend Server" });
+});
+app.post(["/api/health", "/api/ping"], (req, res) => {
+  res.json({ status: "online", ping: "pong", service: "Locate Go Backend Server" });
+});
+
 // فحص الطلب تلقائياً
 app.post("/api/orders/evaluate", (req, res) => {
   const { storeLat, storeLng, customerLat, customerLng, payoutSar } = req.body;
@@ -69,6 +77,13 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 app = FastAPI()
+
+@app.get("/api/health")
+@app.get("/api/ping")
+@app.post("/api/health")
+@app.post("/api/ping")
+def ping():
+    return {"status": "online", "ping": "pong", "service": "Locate Go Backend Server"}
 
 def calculate_haversine(lat1, lon1, lat2, lon2):
     R = 6371.0 # كيلومتر

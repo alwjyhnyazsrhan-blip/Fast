@@ -66,17 +66,41 @@ async function startServer() {
 
   app.use(express.json());
 
+  // CORS middleware for Android mobile app & cross-origin test clients
+  app.use((_req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, User-Agent");
+    if (_req.method === "OPTIONS") {
+      return res.sendStatus(204);
+    }
+    next();
+  });
+
   // ==========================================
-  // 1. HEALTH & SYSTEM DIAGNOSTICS
+  // 1. HEALTH & PING DIAGNOSTICS FOR ANDROID APP
+  // Responds to GET & POST on both /api/health and /api/ping
   // ==========================================
-  app.get(["/api/health", "/api/ping"], (_req: Request, res: Response) => {
-    res.json({
+  const handleHealthAndPing = (_req: Request, res: Response) => {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    return res.status(200).json({
       status: "online",
+      success: true,
+      ping: "pong",
       service: "Locate Go Backend Server",
+      message: "سيرفر Locate Go متصل وجاهز لاستقبال وفحص الطلبات",
       timestamp: new Date().toISOString(),
       uptimeSeconds: Math.floor(process.uptime()),
+      isRunning: state.isRunning,
+      maxDistanceKm: state.settings.maxDistanceKm,
+      driverLocation: state.driverLocation,
     });
-  });
+  };
+
+  app.get("/api/health", handleHealthAndPing);
+  app.post("/api/health", handleHealthAndPing);
+  app.get("/api/ping", handleHealthAndPing);
+  app.post("/api/ping", handleHealthAndPing);
 
   // ==========================================
   // 2. GET CURRENT SYSTEM STATUS & SETTINGS
