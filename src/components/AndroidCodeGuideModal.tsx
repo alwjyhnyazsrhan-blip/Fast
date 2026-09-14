@@ -386,6 +386,8 @@ import android.graphics.Rect
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.Log
@@ -404,12 +406,8 @@ import java.util.regex.Pattern
  * 1. تقييد المراقبة وقراءة الشاشة حصرياً للحزمتين:
  *    - "Sa.lg.android.locate"
  *    - "sa.lg.android.locatcc"
- * 2. تصفية النصوص برمجياً لاستخراج بيانات الطلبات فقط:
- *    - رقم الطلب (Order ID)
- *    - المسافة الفعلية (Distance in Km)
- *    - سعر/أجر التوصيل (Payout in SAR)
- *    - تفاصيل المتجر والتوصيل للعميل (Pickup & Delivery Details)
- * 3. تجاهل تام للقوائم والأزرار والعناصر غير المتعلقة بالعروض لمنع إرسال بيانات غير مهمة للسيرفر.
+ * 2. إيقاف وتطهير وسائط ومؤقتات السحب الآلي تماماً (Handler.removeCallbacksAndMessages) فور الخروج من التطبيقين
+ * 3. تصفية النصوص برمجياً لاستخراج بيانات الطلبات فقط واستبعاد القوائم والأزرار الجانبية
  */
 class LocateGoAccessibilityService : AccessibilityService() {
 
@@ -422,7 +420,8 @@ class LocateGoAccessibilityService : AccessibilityService() {
 
         fun isTargetPackage(pkg: String?): Boolean {
             if (pkg.isNullOrBlank()) return false
-            return TARGET_PACKAGES.contains(pkg.trim().lowercase())
+            val p = pkg.trim()
+            return p == "Sa.lg.android.locate" || p == "sa.lg.android.locatcc" || TARGET_PACKAGES.contains(p.lowercase())
         }
 
         // قائمة الكلمات والنصوص الواجب تجاهلها (القوائم، التبويبات، الإعدادات، وأزرار التنقل العامة)
@@ -445,6 +444,10 @@ class LocateGoAccessibilityService : AccessibilityService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var renderClient: RenderApiClient
 
+    // وسائط التحكم في السحب الآلي
+    private val swipeHandler = Handler(Looper.getMainLooper())
+    private var isSwipeLoopRunning = false
+
     // تعابير نمطية مستهدفة بدقة لبيانات عروض الطلبات
     private val distancePattern = Pattern.compile(
         "(?:المسافة|يبعد|تبعد|distance)?\\\\s*[:]?\\\\s*(\\\\d+(?:[.,]\\\\d+)?)\\\\s*(?:كم|كيلو|km|k\\\\.m)",
@@ -464,7 +467,6 @@ class LocateGoAccessibilityService : AccessibilityService() {
     )
 
     private val isEvaluatingOrder = AtomicBoolean(false)
-    private var refreshJob: Job? = null
     private var currentForegroundPackage = ""
     private val processedOrdersCache = ConcurrentHashMap<String, Long>()
 
@@ -472,41 +474,74 @@ class LocateGoAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         renderClient = RenderApiClient(this)
 
-        // حصر الاستماع برمجياً بالحزمتين المستهدفتين فقط
-        val info = serviceInfo ?: AccessibilityServiceInfo()
-        info.packageNames = arrayOf(
-            "Sa.lg.android.locate",
-            "sa.lg.android.locate",
-            "sa.lg.android.locatcc",
-            "Sa.lg.android.locatcc"
-        )
-        serviceInfo = info
-
         Log.i("LocateGoService", "⚡ LocateGoAccessibilityService is ACTIVE. Restricted exclusively to Sa.lg.android.locate & sa.lg.android.locatcc.")
-        startAggressiveRefreshLoop()
     }
 
-    private fun startAggressiveRefreshLoop() {
-        refreshJob?.cancel()
-        refreshJob = serviceScope.launch {
-            while (isActive) {
-                delay(${refreshIntervalMs}L)
+    /**
+     * إيقاف وتطهير مؤقت وسائط السحب الآلي تماماً فوراً
+     */
+    private fun stopSwipeLoop() {
+        isSwipeLoopRunning = false
+        swipeHandler.removeCallbacksAndMessages(null)
+        currentForegroundPackage = ""
+    }
 
-                if (isEvaluatingOrder.get()) continue
+    /**
+     * بدء السحب الآلي حصرياً داخل التطبيقين المستهدفين
+     */
+    private fun startSwipeLoop() {
+        if (isSwipeLoopRunning) return
+        if (!isTargetPackage(currentForegroundPackage)) return
 
-                val curPkgLower = currentForegroundPackage.lowercase().trim()
-                if (curPkgLower == "sa.lg.android.locate" || curPkgLower == "sa.lg.android.locatcc") {
-                    withContext(Dispatchers.Main) {
-                        performSwipeDownToRefresh()
-                    }
-                }
+        isSwipeLoopRunning = true
+        swipeHandler.removeCallbacksAndMessages(null)
+        swipeHandler.postDelayed(swipeRunnable, 1000L)
+    }
+
+    private val swipeRunnable = object : Runnable {
+        override fun run() {
+            if (!isSwipeLoopRunning) return
+
+            // 1. التحقق من الحزمة المحفوظة
+            if (!isTargetPackage(currentForegroundPackage)) {
+                stopSwipeLoop()
+                return
+            }
+
+            // 2. التحقق من النافذة النشطة في الشاشة حالياً
+            val activeRoot = rootInActiveWindow
+            val activePkg = activeRoot?.packageName?.toString() ?: ""
+            if (activePkg.isNotEmpty() && !isTargetPackage(activePkg)) {
+                stopSwipeLoop()
+                return
+            }
+
+            // 3. تنفيذ السحب إذا لم يكن هناك طلب قيد الفحص
+            if (!isEvaluatingOrder.get()) {
+                performSwipeDownToRefresh()
+            }
+
+            // 4. إعادة الجدولة إذا ما زال التطبيق في الواجهة
+            if (isSwipeLoopRunning && isTargetPackage(currentForegroundPackage)) {
+                swipeHandler.postDelayed(this, ${refreshIntervalMs}L)
             }
         }
     }
 
+    /**
+     * محاكاة حركة السحب للأسفل بالعتاد الأصلي في 160ms فقط لتحديث الشاشة
+     */
     private fun performSwipeDownToRefresh() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
         if (isEvaluatingOrder.get()) return
+
+        // فحص صارم قبل بث الإيماءة لضمان عدم لمس أي نافذة غير مصرح بها
+        val activeRoot = rootInActiveWindow
+        val activePkg = activeRoot?.packageName?.toString() ?: ""
+        if (activePkg.isNotEmpty() && !isTargetPackage(activePkg)) {
+            stopSwipeLoop()
+            return
+        }
 
         val metrics = resources.displayMetrics
         val centerX = metrics.widthPixels * 0.5f
@@ -528,14 +563,19 @@ class LocateGoAccessibilityService : AccessibilityService() {
 
         val packageName: String = event.packageName?.toString() ?: ""
         val lowerPkg: String = packageName.lowercase().trim()
-        if (packageName != "Sa.lg.android.locate" &&
-            packageName != "sa.lg.android.locatcc" &&
-            lowerPkg != "sa.lg.android.locate" &&
-            lowerPkg != "sa.lg.android.locatcc") {
+        val isTarget = (packageName == "Sa.lg.android.locate" ||
+                        packageName == "sa.lg.android.locatcc" ||
+                        lowerPkg == "sa.lg.android.locate" ||
+                        lowerPkg == "sa.lg.android.locatcc")
+
+        // إذا كانت الحزمة الحالية ليست ضمن القائمة المسموحة: إيقاف وتطهير فوري للسحب والخروج
+        if (!isTarget) {
+            stopSwipeLoop()
             return
         }
 
         currentForegroundPackage = packageName
+        startSwipeLoop()
 
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
             event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
@@ -780,12 +820,14 @@ class LocateGoAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
-        super.onDestroy()
-        refreshJob?.cancel()
+        stopSwipeLoop()
         serviceScope.cancel()
+        super.onDestroy()
     }
 
-    override fun onInterrupt() {}
+    override fun onInterrupt() {
+        stopSwipeLoop()
+    }
 }
 `;
 
