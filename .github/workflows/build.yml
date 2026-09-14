@@ -18,10 +18,9 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Generate Gradle Wrapper & Build APK
+    - name: Build APK with Gradle
       run: |
         gradle wrapper --gradle-version 6.1.1
         chmod +x gradlew
         ./gradlew assembleRelease
-      # إذا كان مشروع الأندرويد داخل مجلد فرعي، أضف سطر مسار العمل هنا، مثلاً:
-      # working-directory: ./اسم_المجلد_الفرعي
+      working-directory: ./
