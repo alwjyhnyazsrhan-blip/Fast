@@ -18,16 +18,9 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Build APK with Gradle
+    - name: List files to find project directory
       run: |
-        # ادخل إلى اسم المجلد الذي يحتوي على مشروع الأندرويد (تأكد من استبدال app باسم المجلد الصحيح لديك إذا كان مختلفاً)
-        cd app
-        gradle wrapper --gradle-version 6.1.1
-        chmod +x gradlew
-        ./gradlew assembleRelease
-
-    - name: Upload APK Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: app-release
-        path: app/build/outputs/apk/release/app-release-unsigned.apk
+        echo "--- Root Files ---"
+        ls -la
+        echo "--- Finding build.gradle files ---"
+        find . -name "build.gradle" -o -name "build.gradle.kts"
