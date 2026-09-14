@@ -19,10 +19,11 @@ export default function App() {
     vibrationFeedback: true,
   });
 
-  const [orders, setOrders] = useState<OrderItem[]>(INITIAL_ORDERS);
+  const [orders, setOrders] = useState<OrderItem[]>([]);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'server' | 'floating' | 'code'>('dashboard');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [isLocating, setIsLocating] = useState<boolean>(false);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
   const [status, setStatus] = useState<LocateGoStatus>({
     isRunning: true,
@@ -324,24 +325,13 @@ export default function App() {
     }
   };
 
-  // Instant simulation offer
-  const handleSimulateOffer = useCallback(() => {
-    const stores = [
-      { name: 'شاورمر - الملقا', dist: 1.4, payout: 21 },
-      { name: 'بيك كافيه - الصحافة', dist: 2.7, payout: 19 },
-      { name: 'ماكدونالدز - الياسمين', dist: 0.9, payout: 17 },
-      { name: 'بيتزا هت - العقيق', dist: 3.4, payout: 24 },
-      { name: 'دانكن دونتس - حطين', dist: 1.6, payout: 18 },
-    ];
-    const picked = stores[Math.floor(Math.random() * stores.length)];
-    handleProcessOrder({
-      appName: 'جاهز',
-      storeName: picked.name,
-      customerDistrict: 'شمال الرياض',
-      distanceKm: picked.dist,
-      payoutSar: picked.payout,
-    });
-  }, [handleProcessOrder]);
+  // Real server synchronization
+  const handleRefreshServerOrders = useCallback(async () => {
+    setIsRefreshing(true);
+    await fetchServerStatus();
+    await fetchServerOrders();
+    setIsRefreshing(false);
+  }, [fetchServerStatus, fetchServerOrders]);
 
   return (
     <div className="min-h-screen bg-[#090d16] text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-black">
@@ -352,7 +342,8 @@ export default function App() {
         onToggleSound={() => setSoundEnabled(!soundEnabled)}
         activeTab={activeTab}
         onChangeTab={setActiveTab}
-        onSimulateOffer={handleSimulateOffer}
+        onRefreshServer={handleRefreshServerOrders}
+        isRefreshing={isRefreshing}
       />
 
       {/* Main Content Area */}
@@ -405,12 +396,11 @@ export default function App() {
               latestOrder={orders[0] || null}
               onTogglePower={handleTogglePower}
               onUpdateMaxDistance={handleUpdateMaxDistance}
-              onSimulateOffer={handleSimulateOffer}
             />
           </div>
         )}
 
-        {/* VIEW 4: Android Jetpack Compose Code & Implementation Guide */}
+        {/* VIEW 4: Android Accessibility Service & Render Integration Guide */}
         {activeTab === 'code' && (
           <div className="animate-fadeIn">
             <AndroidCodeGuideModal />

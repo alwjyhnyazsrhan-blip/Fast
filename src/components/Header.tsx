@@ -9,7 +9,7 @@ import {
   LayoutDashboard, 
   Code2, 
   Server,
-  Sparkles,
+  RefreshCw,
   Wifi,
   WifiOff
 } from 'lucide-react';
@@ -21,7 +21,8 @@ interface HeaderProps {
   onToggleSound: () => void;
   activeTab: 'dashboard' | 'server' | 'floating' | 'code';
   onChangeTab: (tab: 'dashboard' | 'server' | 'floating' | 'code') => void;
-  onSimulateOffer: () => void;
+  onRefreshServer: () => void;
+  isRefreshing?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -30,7 +31,8 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleSound,
   activeTab,
   onChangeTab,
-  onSimulateOffer,
+  onRefreshServer,
+  isRefreshing = false,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-[#0c1220]/90 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 sm:px-6">
@@ -148,20 +150,15 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Global Controls & Action trigger */}
         <div className="flex items-center justify-end gap-2">
-          {/* Simulate Offer Button */}
+          {/* Real Server Sync Button */}
           <button
-            id="btn-simulate-offer"
-            onClick={onSimulateOffer}
-            disabled={!status.isRunning}
-            title={status.isRunning ? 'فحص طلب حقيقي عبر السيرفر فوراً' : 'يرجى تشغيل الأداة أولاً'}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
-              status.isRunning
-                ? 'bg-gradient-to-r from-cyan-600/30 to-blue-600/30 hover:from-cyan-600/40 hover:to-blue-600/40 text-cyan-200 border-cyan-500/40 shadow-sm cursor-pointer active:scale-95'
-                : 'bg-slate-800/40 text-slate-500 border-slate-800 cursor-not-allowed'
-            }`}
+            id="btn-refresh-server"
+            onClick={onRefreshServer}
+            title="مزامنة وتحديث الطلبات الواردة من السيرفر المباشر"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 border-slate-700 shadow-sm cursor-pointer active:scale-95"
           >
-            <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-            <span>فحص طلب فوري</span>
+            <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span>مزامنة السيرفر</span>
           </button>
 
           {/* Sound Toggle */}

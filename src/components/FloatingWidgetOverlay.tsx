@@ -24,7 +24,6 @@ interface FloatingWidgetOverlayProps {
   latestOrder: OrderItem | null;
   onTogglePower: () => void;
   onUpdateMaxDistance: (km: number) => void;
-  onSimulateOffer: () => void;
 }
 
 export const FloatingWidgetOverlay: React.FC<FloatingWidgetOverlayProps> = ({
@@ -33,7 +32,6 @@ export const FloatingWidgetOverlay: React.FC<FloatingWidgetOverlayProps> = ({
   latestOrder,
   onTogglePower,
   onUpdateMaxDistance,
-  onSimulateOffer,
 }) => {
   const [isExpanded, setIsExpanded] = useState<boolean>(true);
   const [widgetPosition, setWidgetPosition] = useState<{ x: number; y: number }>({ x: 20, y: 70 });
@@ -84,18 +82,10 @@ export const FloatingWidgetOverlay: React.FC<FloatingWidgetOverlayProps> = ({
             </button>
           </div>
 
-          <button
-            onClick={onSimulateOffer}
-            disabled={!status.isRunning}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
-              status.isRunning
-                ? 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 border-cyan-400 shadow-md shadow-cyan-500/20 cursor-pointer active:scale-95'
-                : 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>محاكاة طلب جديد</span>
-          </button>
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border bg-emerald-950/40 border-emerald-500/30 text-emerald-300">
+            <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+            <span>بانتظار طلب حقيقي</span>
+          </div>
         </div>
       </div>
 

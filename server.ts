@@ -218,10 +218,12 @@ async function startServer() {
         storeLng
       );
     } else if (typeof inputDistance === "number" && inputDistance > 0) {
-      // Direct distance extracted by OCR or app parameter
+      // Direct distance extracted by Accessibility Service / OCR
       computedDistance = Math.round(inputDistance * 10) / 10;
     } else {
-      computedDistance = 1.8;
+      return res.status(400).json({
+        error: "بيانات المسافة مفقودة: يجب إرسال distanceKm أو إحداثيات المتجر والعميل.",
+      });
     }
 
     const maxAllowed = state.settings.maxDistanceKm;

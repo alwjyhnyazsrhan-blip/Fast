@@ -175,7 +175,7 @@ def evaluate_order(req: EvaluateOrderRequest):
     elif req.distanceKm is not None and req.distanceKm > 0:
         computed_distance = round(req.distanceKm, 1)
     else:
-        computed_distance = 2.0
+        raise HTTPException(status_code=400, detail="بيانات المسافة مفقودة: يجب إرسال distanceKm أو إحداثيات المتجر والعميل.")
 
     max_dist = server_state["settings"]["maxDistanceKm"]
     min_payout = server_state["settings"]["minPayoutSar"]
