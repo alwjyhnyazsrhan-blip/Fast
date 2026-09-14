@@ -1,0 +1,49 @@
+export type AppSource = 'jahez' | 'hungerstation' | 'marsool' | 'toyou' | 'ninja' | 'chefz';
+
+export interface OrderItem {
+  id: string;
+  appSource: AppSource;
+  appName: string;
+  storeName: string;
+  customerDistrict: string;
+  distanceKm: number;
+  payoutSar: number;
+  detectedAt: Date;
+  status: 'accepted' | 'rejected';
+  rejectionReason?: string;
+  autoAccepted: boolean;
+  coordinates?: {
+    store?: { lat: number; lng: number };
+    customer?: { lat: number; lng: number };
+    driver?: { lat: number; lng: number };
+  };
+}
+
+export interface LocateGoSettings {
+  maxDistanceKm: number;
+  autoAccept: boolean;
+  soundAlerts: boolean;
+  minPayoutSar: number;
+  vibrationFeedback: boolean;
+}
+
+export interface DriverLocation {
+  lat: number;
+  lng: number;
+  accuracy?: number;
+  updatedAt: string;
+}
+
+export interface LocateGoStatus {
+  isRunning: boolean;
+  isOverlayActive: boolean;
+  isMonitoringScreen: boolean;
+  fps: number;
+  latencyMs: number;
+  lastScanTimestamp: number;
+  totalScanned: number;
+  acceptedCount: number;
+  rejectedCount: number;
+  serverConnected: boolean;
+  driverLocation?: DriverLocation | null;
+}
