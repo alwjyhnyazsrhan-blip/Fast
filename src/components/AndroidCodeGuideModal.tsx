@@ -523,9 +523,11 @@ class LocateGoAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        val packageName = event?.packageName?.toString() ?: ""
+        if (event == null) return
+
+        val packageName: String = event.packageName?.toString() ?: ""
         if (packageName != "Sa.lg.android.locate" && packageName != "sa.lg.android.locatcc") {
-            return // تجاهل تام لأي حدث أو حركة سحب أو قراءة شاشة من خارج هذين التطبيقين
+            return
         }
 
         currentForegroundPackage = packageName
