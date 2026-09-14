@@ -23,7 +23,10 @@ class RenderApiClient(private val context: Context) {
     var baseUrl: String
         get() = prefs.getString("render_url", "https://fast-34v4.onrender.com") ?: "https://fast-34v4.onrender.com"
         set(value) {
-            var clean = value.trim().removeSuffix("/")
+            // إزالة أي مسافات أو أحرف اتجاه خفية (RTL/LTR marks) قد تدرجها لوحة المفاتيح العربية
+            var clean = value.trim()
+                .replace(Regex("[\\u200B-\\u200F\\uFEFF\\u00A0\\u202A-\\u202E\\s]"), "")
+                .removeSuffix("/")
             if (!clean.startsWith("http://") && !clean.startsWith("https://") && clean.isNotEmpty()) {
                 clean = "https://$clean"
             }
@@ -32,9 +35,9 @@ class RenderApiClient(private val context: Context) {
 
     private val httpClient = OkHttpClient.Builder()
         .connectionPool(ConnectionPool(8, 5, TimeUnit.MINUTES))
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .writeTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(25, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
+        .writeTimeout(25, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
 

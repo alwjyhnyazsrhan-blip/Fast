@@ -125,6 +125,8 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(ContextCompat.getColor(context, R.color.card_bg))
             setPadding(24, 20, 24, 20)
             textSize = 13f
+            isSingleLine = true
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
         }
         rootLayout.addView(serverUrlInput)
 
