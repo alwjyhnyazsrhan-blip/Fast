@@ -122,7 +122,7 @@ class LocateGoAccessibilityService : AccessibilityService() {
                 if (isEvaluatingOrder.get()) continue
 
                 // تنفيذ السحب فقط إذا كان التطبيق الحالي في الواجهة هو أحد التطبيقين المستهدفين
-                if (isTargetPackage(currentForegroundPackage)) {
+                if (currentForegroundPackage == "Sa.lg.android.locate" || currentForegroundPackage == "sa.lg.android.locatcc") {
                     withContext(Dispatchers.Main) {
                         performSwipeDownToRefresh()
                     }
@@ -154,22 +154,18 @@ class LocateGoAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null) return
-
-        val eventPkg = event.packageName?.toString() ?: return
-
-        // 1. تصفية صارمة للحزم: تجاهل أي حدث يصدر من خارج الحزمتين المستهدفتين
-        if (!isTargetPackage(eventPkg)) {
-            return
+        val packageName = event?.packageName?.toString() ?: ""
+        if (packageName != "Sa.lg.android.locate" && packageName != "sa.lg.android.locatcc") {
+            return // تجاهل تام لأي حدث أو حركة سحب أو قراءة شاشة من خارج هذين التطبيقين
         }
 
-        currentForegroundPackage = eventPkg
+        currentForegroundPackage = packageName
 
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
             event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
 
         val root = rootInActiveWindow ?: return
-        inspectScreenFilteredOrderOnly(root, eventPkg)
+        inspectScreenFilteredOrderOnly(root, packageName)
     }
 
     /**
