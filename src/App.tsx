@@ -7,8 +7,9 @@ import { FloatingWidgetOverlay } from './components/FloatingWidgetOverlay';
 import { AndroidCodeGuideModal } from './components/AndroidCodeGuideModal';
 import { ServerDeployGuide } from './components/ServerDeployGuide';
 import { AndroidNativeControls } from './components/AndroidNativeControls';
+import { VipLockScreen } from './components/VipLockScreen';
 import { LocateGoSettings, LocateGoStatus, OrderItem, AppSource } from './types';
-import { INITIAL_ORDERS, APP_CONFIG } from './utils/sampleData';
+import { INITIAL_ORDERS, APP_CONFIG, resolveAppSource } from './utils/sampleData';
 import { soundManager } from './utils/audio';
 import { getNativeBridge, isRunningInAndroidApp } from './utils/nativeBridge';
 
@@ -26,6 +27,29 @@ export default function App() {
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [isLocating, setIsLocating] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  // VIP Access Lock Screen State
+  const [isVipUnlocked, setIsVipUnlocked] = useState<boolean>(false);
+  const [vipCode, setVipCode] = useState<string>('');
+
+  // Listen for VIP Unlock event from data-bridge.js
+  useEffect(() => {
+    const handleVipEvent = (e: any) => {
+      setIsVipUnlocked(true);
+      if (e.detail?.code) setVipCode(e.detail.code);
+    };
+
+    window.addEventListener('vip_unlocked', handleVipEvent);
+    (window as any).onVipUnlocked = (data: any) => {
+      setIsVipUnlocked(true);
+      if (data?.code) setVipCode(data.code);
+    };
+
+    return () => {
+      window.removeEventListener('vip_unlocked', handleVipEvent);
+      delete (window as any).onVipUnlocked;
+    };
+  }, []);
 
   const [status, setStatus] = useState<LocateGoStatus>({
     isRunning: true,
@@ -134,10 +158,8 @@ export default function App() {
         if (Array.isArray(data.orders) && data.orders.length > 0) {
           const mappedOrders: OrderItem[] = data.orders.map((o: any) => ({
             id: o.id,
-            appSource: (o.appName?.toLowerCase().includes('هنقر') ? 'hungerstation' :
-                        o.appName?.toLowerCase().includes('مرسول') ? 'marsool' :
-                        o.appName?.toLowerCase().includes('تويو') ? 'toyou' : 'jahez') as AppSource,
-            appName: o.appName || 'جاهز',
+            appSource: resolveAppSource(o.appName),
+            appName: o.appName || 'Locate Go',
             storeName: o.storeName || 'متجر',
             customerDistrict: o.customerDistrict || 'الرياض',
             distanceKm: o.distanceKm || 2.0,
@@ -338,9 +360,7 @@ export default function App() {
           const serverOrder = data.order;
           const mappedOrder: OrderItem = {
             id: serverOrder.id,
-            appSource: (orderPayload.appName.includes('هنقر') ? 'hungerstation' :
-                        orderPayload.appName.includes('مرسول') ? 'marsool' :
-                        orderPayload.appName.includes('تويو') ? 'toyou' : 'jahez') as AppSource,
+            appSource: resolveAppSource(serverOrder.appName || orderPayload.appName),
             appName: serverOrder.appName,
             storeName: serverOrder.storeName,
             customerDistrict: serverOrder.customerDistrict,
@@ -372,7 +392,7 @@ export default function App() {
       const isAccepted = distance <= settings.maxDistanceKm;
       const fallbackOrder: OrderItem = {
         id: `ord-${Math.floor(1000 + Math.random() * 9000)}`,
-        appSource: 'jahez',
+        appSource: resolveAppSource(orderPayload.appName),
         appName: orderPayload.appName,
         storeName: orderPayload.storeName,
         customerDistrict: orderPayload.customerDistrict || 'حي الياسمين',
@@ -416,6 +436,18 @@ export default function App() {
     setIsRefreshing(false);
   }, [fetchServerStatus, fetchServerOrders]);
 
+  // If not unlocked, lock the entire interface with VIP ACCESS Screen
+  if (!isVipUnlocked) {
+    return (
+      <VipLockScreen
+        onUnlock={(code) => {
+          setVipCode(code);
+          setIsVipUnlocked(true);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#090d16] text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-black">
       {/* Top Navigation & Status Header */}
@@ -427,6 +459,11 @@ export default function App() {
         onChangeTab={setActiveTab}
         onRefreshServer={handleRefreshServerOrders}
         isRefreshing={isRefreshing}
+        vipCode={vipCode}
+        onRelock={() => {
+          localStorage.removeItem('vip_active_code');
+          setIsVipUnlocked(false);
+        }}
       />
 
       {/* Main Content Area */}

@@ -10,7 +10,9 @@ import {
   ExternalLink,
   ShieldCheck,
   Radio,
-  RefreshCw
+  RefreshCw,
+  Target,
+  Zap
 } from 'lucide-react';
 import { getNativeBridge, isRunningInAndroidApp } from '../utils/nativeBridge';
 import { LocateGoSettings, LocateGoStatus } from '../types';
@@ -21,6 +23,15 @@ interface AndroidNativeControlsProps {
   onTogglePower: () => void;
   onUpdateSettings: (newSettings: Partial<LocateGoSettings>) => void;
 }
+
+const TARGET_PACKAGES_INFO = [
+  { pkg: 'Sa.lg.android.locate', name: 'Locate Go', label: 'الرئيسي' },
+  { pkg: 'sa.lg.android.locatcc', name: 'Locate CC', label: 'كول سنتر' },
+  { pkg: 'Sa.lg.android.locati', name: 'Locate I', label: 'فئة I' },
+  { pkg: 'sa.lg.android.locatm', name: 'Locate M', label: 'فئة M' },
+  { pkg: 'sa.lg.android.locatg', name: 'Locate G', label: 'فئة G' },
+  { pkg: 'Sa.lg.android.locatf', name: 'Locate F', label: 'فئة F' },
+];
 
 export const AndroidNativeControls: React.FC<AndroidNativeControlsProps> = ({
   settings,
@@ -191,6 +202,46 @@ export const AndroidNativeControls: React.FC<AndroidNativeControlsProps> = ({
         </button>
       </div>
 
+      {/* Target Delivery Applications Matrix */}
+      <div className="mt-4 pt-3.5 border-t border-slate-800/80">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5">
+          <div className="flex items-center gap-2">
+            <Target className="w-4 h-4 text-cyan-400" />
+            <span className="text-xs font-bold text-white">حزم تطبيقات التوصيل المستهدفة (6 حزم نشطة - Zero Delay):</span>
+          </div>
+          <span className="text-[11px] text-emerald-400 font-medium flex items-center gap-1">
+            <Zap className="w-3 h-3 text-emerald-400" />
+            اعتماد حصري على مسافة العميل (≤ {settings.maxDistanceKm} كم) • بدون سحب
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          {TARGET_PACKAGES_INFO.map((item) => (
+            <div
+              key={item.pkg}
+              className="bg-slate-900/90 border border-slate-800 hover:border-cyan-500/40 rounded-xl p-2.5 flex flex-col justify-between transition-colors"
+            >
+              <div className="flex items-center justify-between gap-1 mb-1">
+                <span className="text-xs font-bold text-white">{item.name}</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-950/70 border border-cyan-500/30 text-cyan-300 font-mono">
+                  {item.label}
+                </span>
+              </div>
+              <span className="text-[10px] font-mono text-slate-400 truncate dir-ltr select-all" title={item.pkg}>
+                {item.pkg}
+              </span>
+              <div className="mt-1.5 pt-1.5 border-t border-slate-800/60 flex items-center justify-between text-[10px]">
+                <span className="text-emerald-400 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  مراقب لحظياً
+                </span>
+                <span className="text-slate-400">بدون سحب</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Live System Diagnostics Sub-bar */}
       <div className="mt-3.5 pt-3 border-t border-slate-800/70 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 font-mono">
         <div className="flex items-center gap-2">
@@ -199,6 +250,8 @@ export const AndroidNativeControls: React.FC<AndroidNativeControlsProps> = ({
         </div>
         <div className="flex items-center gap-3">
           <span>نطاق العميل الفعال: <strong className="text-emerald-400 font-bold">{settings.maxDistanceKm} كم</strong></span>
+          <span>•</span>
+          <span>مسافة المطعم: <strong className="text-cyan-300">مفتوحة واختيارية</strong></span>
           <span>•</span>
           <span>القبول التلقائي: <strong className={settings.autoAccept ? 'text-emerald-400' : 'text-slate-400'}>{settings.autoAccept ? 'مفعل' : 'معطل'}</strong></span>
         </div>

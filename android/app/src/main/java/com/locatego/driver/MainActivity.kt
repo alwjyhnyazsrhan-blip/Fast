@@ -132,6 +132,26 @@ class MainActivity : AppCompatActivity() {
         webView.addJavascriptInterface(bridge, "LocateGoNative")
 
         webView.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                val url = request?.url?.toString() ?: ""
+                if (url.startsWith("vip://unlock")) {
+                    runOnUiThread {
+                        Toast.makeText(this@MainActivity, "👑 تم قبول كود VIP وفتح التطبيق بنجاح!", Toast.LENGTH_SHORT).show()
+                        view?.evaluateJavascript("if (window.onVipUnlocked) window.onVipUnlocked();", null)
+                    }
+                    return true
+                }
+                if (url.startsWith("https://t.me/") || url.startsWith("tg://")) {
+                    try {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        return true
+                    } catch (e: Exception) {
+                        // ignore if telegram not installed
+                    }
+                }
+                return super.shouldOverrideUrlLoading(view, request)
+            }
+
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 progressBar.visibility = View.VISIBLE
             }

@@ -33,16 +33,23 @@ import java.util.regex.Pattern
 class LocateGoAccessibilityService : AccessibilityService() {
 
     companion object {
-        // الحزمتان المستهدفتان حصرياً
+        // مصفوفة حزم تطبيقات التوصيل المستهدفة بالكامل
         val TARGET_PACKAGES = setOf(
             "sa.lg.android.locate",
-            "sa.lg.android.locatcc"
+            "sa.lg.android.locatcc",
+            "sa.lg.android.locati",
+            "sa.lg.android.locatm",
+            "sa.lg.android.locatg",
+            "sa.lg.android.locatf",
+            "Sa.lg.android.locate",
+            "Sa.lg.android.locati",
+            "Sa.lg.android.locatf"
         )
 
         fun isTargetPackage(pkg: String?): Boolean {
             if (pkg.isNullOrBlank()) return false
             val p = pkg.trim()
-            return p == "Sa.lg.android.locate" || p == "sa.lg.android.locatcc" || TARGET_PACKAGES.contains(p.lowercase())
+            return TARGET_PACKAGES.contains(p) || TARGET_PACKAGES.contains(p.lowercase())
         }
 
         // قائمة الكلمات والنصوص الواجب تجاهلها (القوائم، التبويبات، الإعدادات، وأزرار التنقل العامة)
@@ -233,7 +240,16 @@ class LocateGoAccessibilityService : AccessibilityService() {
         val isPayoutAccepted = payoutSar >= minPayoutSar
         val isOrderMatching = isAutoAcceptEnabled && isDeliveryWithinLimit && isPayoutAccepted
 
-        val resolvedAppName = if (packageName.contains("locatcc", true)) "Locate CC" else "Locate Go"
+        val lowerPkg = packageName.lowercase()
+        val resolvedAppName = when {
+            lowerPkg.contains("locatcc") -> "Locate CC"
+            lowerPkg.contains("locati") -> "Locate I"
+            lowerPkg.contains("locatm") -> "Locate M"
+            lowerPkg.contains("locatg") -> "Locate G"
+            lowerPkg.contains("locatf") -> "Locate F"
+            lowerPkg.contains("locate") -> "Locate Go"
+            else -> "Locate Driver"
+        }
 
         if (isOrderMatching) {
             // حفظ الطلب في الذاكرة لمنع تكراره

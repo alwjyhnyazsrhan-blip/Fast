@@ -23,6 +23,8 @@ interface HeaderProps {
   onChangeTab: (tab: 'dashboard' | 'server' | 'floating' | 'code') => void;
   onRefreshServer: () => void;
   isRefreshing?: boolean;
+  vipCode?: string;
+  onRelock?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -33,6 +35,8 @@ export const Header: React.FC<HeaderProps> = ({
   onChangeTab,
   onRefreshServer,
   isRefreshing = false,
+  vipCode,
+  onRelock,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-[#0c1220]/90 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 sm:px-6">
@@ -160,6 +164,24 @@ export const Header: React.FC<HeaderProps> = ({
             <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isRefreshing ? 'animate-spin' : ''}`} />
             <span>مزامنة السيرفر</span>
           </button>
+
+          {/* VIP Status Badge */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-semibold">
+            <span>👑 VIP</span>
+            {vipCode && <span className="hidden sm:inline font-mono text-[11px] text-amber-200/80">{vipCode}</span>}
+          </div>
+
+          {/* Relock Button */}
+          {onRelock && (
+            <button
+              id="btn-vip-relock"
+              onClick={onRelock}
+              title="قفل التطبيق والعودة لشاشة VIP ACCESS"
+              className="p-2 rounded-lg border border-slate-700 bg-slate-800/80 hover:bg-rose-950/40 hover:border-rose-500/40 text-slate-400 hover:text-rose-400 transition-all cursor-pointer text-xs"
+            >
+              🔒
+            </button>
+          )}
 
           {/* Sound Toggle */}
           <button

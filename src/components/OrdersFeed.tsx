@@ -221,6 +221,12 @@ export const OrdersFeed: React.FC<OrdersFeedProps> = ({
                 onChange={(e) => setCustomApp(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-cyan-500"
               >
+                <option value="locatego">Locate Go (الرئيسي - Sa.lg.android.locate)</option>
+                <option value="locatecc">Locate CC (كول سنتر - sa.lg.android.locatcc)</option>
+                <option value="locatei">Locate I (فئة I - Sa.lg.android.locati)</option>
+                <option value="locatem">Locate M (فئة M - sa.lg.android.locatm)</option>
+                <option value="locateg">Locate G (فئة G - sa.lg.android.locatg)</option>
+                <option value="locatef">Locate F (فئة F - Sa.lg.android.locatf)</option>
                 <option value="jahez">جاهز (Jahez)</option>
                 <option value="hungerstation">هنقرستيشن (HungerStation)</option>
                 <option value="marsool">مرسول (Mrsool)</option>

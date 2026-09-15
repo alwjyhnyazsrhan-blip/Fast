@@ -1,4 +1,16 @@
-export type AppSource = 'jahez' | 'hungerstation' | 'marsool' | 'toyou' | 'ninja' | 'chefz';
+export type AppSource =
+  | 'jahez'
+  | 'hungerstation'
+  | 'marsool'
+  | 'toyou'
+  | 'ninja'
+  | 'chefz'
+  | 'locatego'
+  | 'locatecc'
+  | 'locatei'
+  | 'locatem'
+  | 'locateg'
+  | 'locatef';
 
 export interface OrderItem {
   id: string;
