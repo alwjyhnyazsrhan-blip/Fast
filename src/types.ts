@@ -7,6 +7,8 @@ export interface OrderItem {
   storeName: string;
   customerDistrict: string;
   distanceKm: number;
+  pickupDistanceKm?: number;
+  deliveryDistanceKm?: number;
   payoutSar: number;
   detectedAt: Date;
   status: 'accepted' | 'rejected';

@@ -113,7 +113,9 @@ class RenderApiClient(private val context: Context) {
         orderId: String? = null,
         customerDistrict: String? = null,
         driverLat: Double? = null,
-        driverLng: Double? = null
+        driverLng: Double? = null,
+        pickupDistanceKm: Double? = null,
+        deliveryDistanceKm: Double? = null
     ): Result<EvaluationResponse> = withContext(Dispatchers.IO) {
         try {
             val url = baseUrl.trim().removeSuffix("/")
@@ -122,6 +124,12 @@ class RenderApiClient(private val context: Context) {
                 put("storeName", storeName)
                 put("distanceKm", distanceKm)
                 put("payoutSar", payoutSar)
+                if (pickupDistanceKm != null) {
+                    put("pickupDistanceKm", pickupDistanceKm)
+                }
+                if (deliveryDistanceKm != null) {
+                    put("deliveryDistanceKm", deliveryDistanceKm)
+                }
                 if (!orderId.isNullOrBlank()) {
                     put("orderId", orderId)
                 }

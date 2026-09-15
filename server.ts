@@ -28,6 +28,8 @@ export interface RealOrder {
   storeName: string;
   customerDistrict: string;
   distanceKm: number;
+  pickupDistanceKm?: number;
+  deliveryDistanceKm?: number;
   payoutSar: number;
   detectedAt: string;
   status: "accepted" | "rejected";
@@ -222,6 +224,8 @@ async function startServer() {
       customerLat,
       customerLng,
       distanceKm: inputDistance,
+      pickupDistanceKm,
+      deliveryDistanceKm,
     } = req.body;
 
     let computedDistance = 0;
@@ -246,6 +250,9 @@ async function startServer() {
         storeLat,
         storeLng
       );
+    } else if (typeof pickupDistanceKm === "number" && pickupDistanceKm > 0) {
+      // Specific pickup distance from restaurant
+      computedDistance = Math.round(pickupDistanceKm * 10) / 10;
     } else if (typeof inputDistance === "number" && inputDistance > 0) {
       // Direct distance extracted by Accessibility Service / OCR
       computedDistance = Math.round(inputDistance * 10) / 10;
@@ -275,6 +282,8 @@ async function startServer() {
       storeName,
       customerDistrict,
       distanceKm: computedDistance,
+      pickupDistanceKm: typeof pickupDistanceKm === "number" ? pickupDistanceKm : undefined,
+      deliveryDistanceKm: typeof deliveryDistanceKm === "number" ? deliveryDistanceKm : undefined,
       payoutSar: Number(payoutSar) || 18,
       detectedAt: new Date().toISOString(),
       status: isAccepted ? "accepted" : "rejected",

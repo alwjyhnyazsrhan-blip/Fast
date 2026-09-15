@@ -388,6 +388,21 @@ export const OrdersFeed: React.FC<OrdersFeedProps> = ({
                         <span className="text-xs text-slate-400 font-normal">← {order.customerDistrict}</span>
                       </h4>
 
+                      {(order.pickupDistanceKm != null || order.deliveryDistanceKm != null) && (
+                        <div className="flex items-center gap-3 mt-1 text-[11px] text-slate-400 font-mono">
+                          {order.pickupDistanceKm != null && (
+                            <span className="text-cyan-400">
+                              المطعم: <strong className="font-bold">{order.pickupDistanceKm} كم</strong>
+                            </span>
+                          )}
+                          {order.deliveryDistanceKm != null && (
+                            <span className="text-amber-400">
+                              العميل: <strong className="font-bold">{order.deliveryDistanceKm} كم</strong>
+                            </span>
+                          )}
+                        </div>
+                      )}
+
                       {order.rejectionReason && (
                         <p className="text-[11px] text-rose-400 flex items-center gap-1 mt-1 font-medium">
                           <AlertTriangle className="w-3 h-3" />
