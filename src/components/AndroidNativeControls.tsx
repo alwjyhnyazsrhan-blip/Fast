@@ -1,0 +1,208 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Smartphone, 
+  Layers, 
+  Accessibility, 
+  BatteryCharging, 
+  Sliders, 
+  CheckCircle2, 
+  AlertCircle, 
+  ExternalLink,
+  ShieldCheck,
+  Radio,
+  RefreshCw
+} from 'lucide-react';
+import { getNativeBridge, isRunningInAndroidApp } from '../utils/nativeBridge';
+import { LocateGoSettings, LocateGoStatus } from '../types';
+
+interface AndroidNativeControlsProps {
+  settings: LocateGoSettings;
+  status: LocateGoStatus;
+  onTogglePower: () => void;
+  onUpdateSettings: (newSettings: Partial<LocateGoSettings>) => void;
+}
+
+export const AndroidNativeControls: React.FC<AndroidNativeControlsProps> = ({
+  settings,
+  status,
+  onTogglePower,
+  onUpdateSettings,
+}) => {
+  const isAndroid = isRunningInAndroidApp();
+  const [nativeStatus, setNativeStatus] = useState<{
+    isTrackingRunning?: boolean;
+    hasOverlayPermission?: boolean;
+    isOverlayShowing?: boolean;
+    currentLatitude?: number | null;
+    currentLongitude?: number | null;
+    isNativeApp?: boolean;
+    androidVersion?: string;
+  }>({});
+
+  const refreshNativeState = () => {
+    const bridge = getNativeBridge();
+    if (bridge) {
+      try {
+        const res = JSON.parse(bridge.getAndroidStatusJson());
+        setNativeStatus(res);
+      } catch {
+        // Fallback
+      }
+    }
+  };
+
+  useEffect(() => {
+    refreshNativeState();
+    const timer = setInterval(refreshNativeState, 3000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const handleOpenAccessibility = () => {
+    const bridge = getNativeBridge();
+    if (bridge) {
+      bridge.openAccessibilitySettings();
+    } else {
+      alert('متاح فقط عند تشغيل التطبيق داخل بيئة أندرويد (Single App)');
+    }
+  };
+
+  const handleToggleOverlay = () => {
+    const bridge = getNativeBridge();
+    if (bridge) {
+      bridge.toggleFloatingOverlay();
+      setTimeout(refreshNativeState, 500);
+    } else {
+      alert('متاح فقط عند تشغيل التطبيق داخل بيئة أندرويد (Single App)');
+    }
+  };
+
+  const handleBatteryOptimization = () => {
+    const bridge = getNativeBridge();
+    if (bridge) {
+      bridge.requestBatteryOptimization();
+    } else {
+      alert('متاح فقط عند تشغيل التطبيق داخل بيئة أندرويد (Single App)');
+    }
+  };
+
+  return (
+    <div className="bg-gradient-to-br from-[#0e1626] to-[#0a0f1d] border border-cyan-500/30 rounded-2xl p-5 shadow-xl relative overflow-hidden">
+      {/* Glow highlight */}
+      <div className="absolute -top-12 -right-12 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none" />
+
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
+            <Smartphone className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-bold text-white">إدارة نظام أندرويد المتكاملة (Single App Mode)</h3>
+              {isAndroid ? (
+                <span className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-950/70 border border-emerald-500/40 text-emerald-400 font-semibold">
+                  <CheckCircle2 className="w-3 h-3" />
+                  داخل تطبيق أندرويد
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-slate-800/80 border border-slate-700 text-slate-400">
+                  <Radio className="w-3 h-3 text-cyan-400" />
+                  محاكاة المتصفح
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-400">
+              تحكم مباشر بخدمات الهاتف الخلفية، قراءة الشاشة، والنافذة العائمة من نفس واجهة السائق
+            </p>
+          </div>
+        </div>
+
+        {isAndroid && (
+          <button
+            onClick={refreshNativeState}
+            className="flex items-center gap-1.5 text-xs text-cyan-400 hover:text-cyan-300 bg-cyan-950/40 border border-cyan-800/40 px-3 py-1.5 rounded-lg cursor-pointer active:scale-95 transition-all"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>تحديث حالة النظام</span>
+          </button>
+        )}
+      </div>
+
+      {/* Quick Action Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+        {/* Button 1: Accessibility Service */}
+        <button
+          onClick={handleOpenAccessibility}
+          className="flex flex-col text-right p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-emerald-500/40 hover:bg-slate-800/60 transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between w-full mb-2">
+            <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 group-hover:scale-105 transition-transform">
+              <Accessibility className="w-4 h-4" />
+            </div>
+            <span className="text-[11px] text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded-md border border-emerald-500/20">
+              إمكانية الوصول
+            </span>
+          </div>
+          <span className="text-sm font-semibold text-white mb-0.5">تفعيل خدمة قراءة الشاشة</span>
+          <span className="text-[11px] text-slate-400 leading-relaxed">
+            للسماح للأداة بقراءة تفاصيل الطلب والضغط التلقائي على "قبول" فوراً.
+          </span>
+        </button>
+
+        {/* Button 2: Floating Overlay Pill */}
+        <button
+          onClick={handleToggleOverlay}
+          className="flex flex-col text-right p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-cyan-500/40 hover:bg-slate-800/60 transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between w-full mb-2">
+            <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 group-hover:scale-105 transition-transform">
+              <Layers className="w-4 h-4" />
+            </div>
+            <span className={`text-[11px] px-2 py-0.5 rounded-md border ${
+              nativeStatus.isOverlayShowing 
+                ? 'text-cyan-300 bg-cyan-950/70 border-cyan-500/40' 
+                : 'text-slate-400 bg-slate-800/60 border-slate-700'
+            }`}>
+              {nativeStatus.isOverlayShowing ? 'النافذة نشطة' : 'تفعيل / إيقاف'}
+            </span>
+          </div>
+          <span className="text-sm font-semibold text-white mb-0.5">النافذة العائمة (Overlay Pill)</span>
+          <span className="text-[11px] text-slate-400 leading-relaxed">
+            ظهور كبسولة عائمة خفيفة وقابلة للتحريك أثناء استخدام تطبيقات التوصيل.
+          </span>
+        </button>
+
+        {/* Button 3: Battery Optimization */}
+        <button
+          onClick={handleBatteryOptimization}
+          className="flex flex-col text-right p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-amber-500/40 hover:bg-slate-800/60 transition-all cursor-pointer group"
+        >
+          <div className="flex items-center justify-between w-full mb-2">
+            <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400 group-hover:scale-105 transition-transform">
+              <BatteryCharging className="w-4 h-4" />
+            </div>
+            <span className="text-[11px] text-amber-400 bg-amber-950/50 px-2 py-0.5 rounded-md border border-amber-500/20">
+              استثناء فوري
+            </span>
+          </div>
+          <span className="text-sm font-semibold text-white mb-0.5">استثناء توفير الطاقة</span>
+          <span className="text-[11px] text-slate-400 leading-relaxed">
+            منع نظام أندرويد من قتل خدمة الخلفية عند قفل شاشة الهاتف.
+          </span>
+        </button>
+      </div>
+
+      {/* Live System Diagnostics Sub-bar */}
+      <div className="mt-3.5 pt-3 border-t border-slate-800/70 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400 font-mono">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+          <span>حالة خدمة أندرويد: {status.isRunning ? 'نشطة ومتصلة' : 'متوقفة'}</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span>نطاق العميل الفعال: <strong className="text-emerald-400 font-bold">{settings.maxDistanceKm} كم</strong></span>
+          <span>•</span>
+          <span>القبول التلقائي: <strong className={settings.autoAccept ? 'text-emerald-400' : 'text-slate-400'}>{settings.autoAccept ? 'مفعل' : 'معطل'}</strong></span>
+        </div>
+      </div>
+    </div>
+  );
+};

@@ -58,9 +58,10 @@ export const AndroidCodeGuideModal: React.FC = () => {
 │   │   └── src/main/
 │   │       ├── AndroidManifest.xml             # جميع الصلاحيات (ACCESS_FINE_LOCATION, Foreground Services, Accessibility)
 │   │       ├── java/com/locatego/driver/
-│   │       │   ├── MainActivity.kt             # واجهة التحكم الأصلية وإدارة الصلاحيات
+│   │       │   ├── MainActivity.kt             # واجهة التطبيق الموحدة الحاضنة للوحة التحكم (Single App Architecture)
+│   │       │   ├── LocateGoNativeBridge.kt     # جسر التواصل البرمجي التفاعلي (@JavascriptInterface) بين React والأندرويد
 │   │       │   ├── LocationTrackingService.kt  # خدمة التتبع الجغرافي المستمر (Foreground Service) بنطاق 2.0 كم
-│   │       │   ├── LocateGoAccessibilityService.kt # خدمة قراءة الشاشة والسحب القسري والنقر التلقائي
+│   │       │   ├── LocateGoAccessibilityService.kt # خدمة قراءة الشاشة والاعتراض الفوري وقبول الطلب (بدون سحب)
 │   │       │   ├── FloatingOverlayService.kt   # النافذة العائمة فوق شاشات تطبيقات التوصيل
 │   │       │   ├── RenderApiClient.kt          # عميل الشبكة فائق السرعة المتصل بسيرفر Render
 │   │       │   └── BootReceiver.kt             # التشغيل التلقائي عند إقلاع الهاتف
@@ -401,14 +402,11 @@ import java.util.regex.Pattern
  *
  * التعديلات الحصرية:
  * 1. إلغاء ميزة السحب التلقائي (Swipe Down / Swipe Loop) نهائياً وبشكل كامل. لا يتم تنفيذ أي حركة سحب للشاشة.
- * 2. مراقبة شاشة تطبيقي Locate Go و Locate CC عند ظهور أي طلب جديد واستخراج التفاصيل بدقة متناهية:
- *    - مسافة المطعم / الاستلام (Pickup Distance)
- *    - مسافة العميل / التوصيل (Delivery Distance)
- *    - المسافة الإجمالية وسعر وأجر التوصيل (Payout in SAR)
- *    - اسم المتجر والحي أو وجهة التوصيل
- * 3. مقارنة فورية ومحلية لجميع المعايير مع إعدادات السائق المحددة (الحد الأقصى للمسافة، مسافة المطعم، أجر الطلب).
- * 4. بمجرد مطابقة الشروط، يتم النقر الفوري والمباشر على زر القبول ("Accept") في أقل من 10ms دون أي تأخير،
- *    ودون انتظار رد الشبكة، مع إرسال تقرير الطلب لسيرفر Render في الخلفية.
+ * 2. معيار الفحص والقبول الحصري:
+ *    - الشرط الأساسي والوحيد للمسافة: "مسافة العميل / الوجهة" (Delivery Distance) <= الحد الأقصى للمسافة المحددة (مثلاً 2 كم).
+ *    - "مسافة المطعم / الاستلام" (Pickup Distance): اختيارية ومفتوحة تماماً بغض النظر عن قيمتها، بحيث يتم قبول الطلب فوراً حتى لو كان المطعم بعيداً.
+ * 3. بمجرد ظهور الطلب ومطابقته للشرط (مسافة العميل <= الحد الأقصى)، يتم النقر المباشر والفوري على زر القبول ("Accept") في أقل من 10ms دون أي تأخير،
+ *    ودون الحاجة لأي عملية تحديث أو سحب للشاشة، مع إرسال تقرير الطلب لسيرفر Render في الخلفية.
  */
 class LocateGoAccessibilityService : AccessibilityService() {
 
@@ -562,9 +560,11 @@ class LocateGoAccessibilityService : AccessibilityService() {
             }
         }
 
-        // المسافة الأساسية لتقييم الطلب
-        val primaryDistanceKm = pickupDistKm ?: generalDistKm ?: deliveryDistKm ?: return
-        if (primaryDistanceKm <= 0.0) return
+        // المسافة الأساسية لتقييم الطلب:
+        // الشرط الأساسي والوحيد للقبول هو أن تكون "مسافة العميل / الوجهة" <= الحد الأقصى المحدد في الإعدادات (مثلاً 2 كم).
+        // أما "مسافة المطعم / الاستلام" فتكون اختيارية ومفتوحة بغض النظر عن قيمتها (حتى لو كان المطعم بعيداً).
+        val targetEvaluationDistanceKm = deliveryDistKm ?: generalDistKm ?: pickupDistKm ?: return
+        if (targetEvaluationDistanceKm <= 0.0) return
 
         // 4. استخراج رقم الطلب إن وجد
         var extractedOrderId: String? = null
@@ -587,27 +587,29 @@ class LocateGoAccessibilityService : AccessibilityService() {
         val customerDistrict = extractCustomerDistrict(joinedContent, orderTexts)
 
         // 8. منع تكرار النقر على نفس الطلب خلال 8 ثوانٍ لتفادي النقر المزدوج غير الضروري
-        val deduplicationKey = "\${extractedOrderId ?: \"\"}|\$primaryDistanceKm|\$payoutSar|\$storeName"
+        val deduplicationKey = "\${extractedOrderId ?: \"\"}|\$targetEvaluationDistanceKm|\$payoutSar|\$storeName"
         val now = System.currentTimeMillis()
         if (processedOrdersCache[deduplicationKey]?.let { now - it < 8_000 } == true) return
 
         // قراءة إعدادات السائق المحددة محلياً من SharedPreferences
         val prefs = getSharedPreferences("locate_go_prefs", Context.MODE_PRIVATE)
         val maxAllowedKm = prefs.getFloat("max_distance_km", 2.0f).toDouble()
-        val maxPickupDistanceKm = prefs.getFloat("max_pickup_distance_km", maxAllowedKm.toFloat()).toDouble()
         val minPayoutSar = prefs.getFloat("min_payout_sar", 0.0f).toDouble()
         val isAutoAcceptEnabled = prefs.getBoolean("auto_accept", true)
 
         Log.i(
             "LocateGoService",
-            "🎯 NEW OFFER DETECTED: Store='\$storeName' | PickupDist=\${pickupDistKm ?: \"N/A\"} km | DeliveryDist=\${deliveryDistKm ?: \"N/A\"} km | PrimaryDist=\$primaryDistanceKm km (Max: \$maxAllowedKm km) | Payout=\$payoutSar SAR (Min: \$minPayoutSar SAR)"
+            "🎯 NEW OFFER DETECTED: Store='\$storeName' | DeliveryDist=\${deliveryDistKm ?: \"N/A\"} km (Strict Max: \$maxAllowedKm km) | PickupDist=\${pickupDistKm ?: \"N/A\"} km (Open/Optional) | EvalDist=\$targetEvaluationDistanceKm km | Payout=\$payoutSar SAR"
         )
 
-        // التحقق من مطابقة الشروط بدقة عالية
-        val isPickupWithinLimit = pickupDistKm == null || pickupDistKm <= maxPickupDistanceKm
-        val isPrimaryWithinLimit = primaryDistanceKm <= maxAllowedKm
+        // =========================================================================
+        // قاعدة الفحص والقبول الصارمة وفق متطلبات السائق:
+        // 1. مسافة العميل / الوجهة <= الحد الأقصى للمسافة (مثلاً 2 كم).
+        // 2. مسافة المطعم مفتوحة واختيارية تماماً ولا تعطل القبول أبداً.
+        // =========================================================================
+        val isDeliveryWithinLimit = targetEvaluationDistanceKm <= maxAllowedKm
         val isPayoutAccepted = payoutSar >= minPayoutSar
-        val isOrderMatching = isAutoAcceptEnabled && isPickupWithinLimit && isPrimaryWithinLimit && isPayoutAccepted
+        val isOrderMatching = isAutoAcceptEnabled && isDeliveryWithinLimit && isPayoutAccepted
 
         val resolvedAppName = if (packageName.contains("locatcc", true)) "Locate CC" else "Locate Go"
 
@@ -620,7 +622,10 @@ class LocateGoAccessibilityService : AccessibilityService() {
             // تنفيذ النقر المباشر والفوري على زر القبول ("Accept") دون أي تأخير إطلاقاً
             // =========================================================================
             val clickSuccess = executeInstantDirectAccept(root)
-            Log.i("LocateGoService", "⚡⚡ ZERO-DELAY ACCEPT TRIGGERED! Click success = \$clickSuccess for order at \$storeName")
+            Log.i(
+                "LocateGoService",
+                "⚡⚡ ZERO-DELAY ACCEPT TRIGGERED! Click success = \$clickSuccess for order at \$storeName (Customer dist: \${deliveryDistKm ?: targetEvaluationDistanceKm} km <= \$maxAllowedKm km, Restaurant dist: \${pickupDistKm ?: \"N/A\"} km - Open)"
+            )
 
             // تنبيه صوتي واهتزاز فوري للمندوب بنجاح القبول
             notifyDriverAccepted()
@@ -630,7 +635,7 @@ class LocateGoAccessibilityService : AccessibilityService() {
                 renderClient.evaluateOrder(
                     appName = resolvedAppName,
                     storeName = storeName,
-                    distanceKm = primaryDistanceKm,
+                    distanceKm = targetEvaluationDistanceKm,
                     payoutSar = payoutSar,
                     orderId = extractedOrderId,
                     customerDistrict = customerDistrict,
@@ -643,11 +648,10 @@ class LocateGoAccessibilityService : AccessibilityService() {
                 isEvaluatingOrder.set(false)
             }
         } else {
-            // إذا لم تطابق المسافة أو الأجر الشروط المحددة
+            // إذا لم تطابق مسافة العميل الحد الأقصى
             processedOrdersCache[deduplicationKey] = now
             val rejectReason = when {
-                !isPickupWithinLimit -> "مسافة المطعم (\$pickupDistKm كم) تتجاوز الحد الأقصى (\$maxPickupDistanceKm كم)"
-                !isPrimaryWithinLimit -> "مسافة الطلب (\$primaryDistanceKm كم) تتجاوز النطاق المحدد (\$maxAllowedKm كم)"
+                !isDeliveryWithinLimit -> "مسافة العميل/الوجهة (\${deliveryDistKm ?: targetEvaluationDistanceKm} كم) تتجاوز الحد الأقصى المحدد (\$maxAllowedKm كم)"
                 !isPayoutAccepted -> "أجر التوصيل (\$payoutSar ر.س) أقل من الحد الأدنى (\$minPayoutSar ر.س)"
                 else -> "القبول التلقائي متوقف في الإعدادات"
             }
@@ -655,12 +659,12 @@ class LocateGoAccessibilityService : AccessibilityService() {
             Log.w("LocateGoService", "🚫 ORDER REJECTED LOCALLY: \$rejectReason")
             notifyDriverRejected()
 
-            // إبلاغ السيرفر بسبب الرفض لتوثيق الإحصائيات
+            // إبلاغ السيرفر لتوثيق الإحصائيات في الخلفية
             serviceScope.launch {
                 renderClient.evaluateOrder(
                     appName = resolvedAppName,
                     storeName = storeName,
-                    distanceKm = primaryDistanceKm,
+                    distanceKm = targetEvaluationDistanceKm,
                     payoutSar = payoutSar,
                     orderId = extractedOrderId,
                     customerDistrict = customerDistrict,
@@ -909,37 +913,45 @@ class LocateGoAccessibilityService : AccessibilityService() {
 `;
 
   // ----------------------------------------------------
-  // 4. MainActivity.kt
+  // 4. MainActivity.kt (Single App Architecture)
   // ----------------------------------------------------
   const MAIN_ACTIVITY_CODE = `package com.locatego.driver
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.net.Uri
+import android.net.http.SslError
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
-import android.view.Gravity
-import android.view.ViewGroup
-import android.widget.*
+import android.view.View
+import android.webkit.*
+import android.widget.FrameLayout
+import android.widget.ProgressBar
+import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
+/**
+ * MainActivity - Single App Architecture
+ * دمج لوحة التحكم بالكامل داخل تطبيق الأندرويد كشاشة أساسية متكاملة (Web/React Integrated UI).
+ */
 class MainActivity : AppCompatActivity() {
 
+    private lateinit var webView: WebView
+    private lateinit var progressBar: ProgressBar
+    private lateinit var bridge: LocateGoNativeBridge
     private lateinit var renderClient: RenderApiClient
-    private lateinit var statusTextView: TextView
-    private lateinit var locationTextView: TextView
-    private lateinit var startServiceBtn: Button
-    private lateinit var overlayBtn: Button
     private lateinit var accessibilityBtn: Button
     private lateinit var serverUrlInput: EditText
 
@@ -956,166 +968,170 @@ class MainActivity : AppCompatActivity() {
         } else {
             Toast.makeText(this, "يجب منح إذن الموقع لتصفية الطلبات في نطاق 2 كم", Toast.LENGTH_LONG).show()
         }
+        syncStateToWeb()
     }
 
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         renderClient = RenderApiClient(this)
+        bridge = LocateGoNativeBridge(this)
 
-        setupNativeUi()
+        setupSingleAppUi()
         checkAndRequestPermissions()
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (webView.canGoBack()) {
+                    webView.goBack()
+                } else {
+                    moveTaskToBack(true)
+                }
+            }
+        })
     }
 
     override fun onResume() {
         super.onResume()
-        updateStatusDisplay()
+        syncStateToWeb()
     }
 
-    private fun setupNativeUi() {
-        val rootLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 48, 48, 48)
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun setupSingleAppUi() {
+        val rootLayout = FrameLayout(this).apply {
             setBackgroundColor(ContextCompat.getColor(context, R.color.background_dark))
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
+        }
+
+        webView = WebView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
             )
+            setBackgroundColor(ContextCompat.getColor(context, R.color.background_dark))
         }
 
-        val scroll = ScrollView(this).apply {
-            addView(rootLayout)
-        }
-        setContentView(scroll)
-
-        val titleText = TextView(this).apply {
-            text = "⚡ Locate Go Driver Native"
-            textSize = 22f
-            setTextColor(ContextCompat.getColor(context, R.color.text_primary))
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER_HORIZONTAL
-        }
-        rootLayout.addView(titleText)
-
-        val subtitleText = TextView(this).apply {
-            text = "اعتراض الطلبات في نطاق 2.0 كم والربط المباشر مع سيرفر Render"
-            textSize = 13f
-            setTextColor(ContextCompat.getColor(context, R.color.text_secondary))
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(0, 8, 0, 32)
-        }
-        rootLayout.addView(subtitleText)
-
-        statusTextView = TextView(this).apply {
-            text = "الحالة: جاري الفحص..."
-            textSize = 14f
-            setTextColor(ContextCompat.getColor(context, R.color.primary))
-            setBackgroundColor(ContextCompat.getColor(context, R.color.card_bg))
-            setPadding(32, 24, 32, 24)
-        }
-        rootLayout.addView(statusTextView)
-
-        locationTextView = TextView(this).apply {
-            text = "إحداثيات المندوب: جاري التقاط GPS..."
-            textSize = 12f
-            setTextColor(ContextCompat.getColor(context, R.color.text_secondary))
-            setPadding(0, 16, 0, 24)
-        }
-        rootLayout.addView(locationTextView)
-
-        val urlLabel = TextView(this).apply {
-            text = "رابط خادم Render المباشر:"
-            textSize = 12f
-            setTextColor(ContextCompat.getColor(context, R.color.text_secondary))
-        }
-        rootLayout.addView(urlLabel)
-
-        serverUrlInput = EditText(this).apply {
-            setText(renderClient.baseUrl)
-            setTextColor(ContextCompat.getColor(context, R.color.text_primary))
-            setBackgroundColor(ContextCompat.getColor(context, R.color.card_bg))
-            setPadding(24, 20, 24, 20)
-            textSize = 13f
-        }
-        rootLayout.addView(serverUrlInput)
-
-        val saveUrlBtn = Button(this).apply {
-            text = "حفظ واختبار اتصال السيرفر"
-            setBackgroundColor(ContextCompat.getColor(context, R.color.accent))
-            setTextColor(ContextCompat.getColor(context, R.color.background_dark))
-            setOnClickListener {
-                val newUrl = serverUrlInput.text.toString().trim()
-                renderClient.baseUrl = newUrl
-                testServerPing()
+        progressBar = ProgressBar(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = android.view.Gravity.CENTER
             }
+            visibility = View.VISIBLE
         }
-        rootLayout.addView(saveUrlBtn)
 
-        addSpacer(rootLayout, 24)
+        rootLayout.addView(webView)
+        rootLayout.addView(progressBar)
+        setContentView(rootLayout)
 
-        startServiceBtn = Button(this).apply {
-            text = "تشغيل خدمة التتبع (نطاق 2 كم)"
-            setBackgroundColor(ContextCompat.getColor(context, R.color.primary))
-            setTextColor(ContextCompat.getColor(context, R.color.background_dark))
-            setOnClickListener {
-                if (LocationTrackingService.isServiceRunning) {
-                    stopLocationService()
-                } else {
-                    startLocationService()
-                }
-                updateStatusDisplay()
+        webView.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            databaseEnabled = true
+            allowFileAccess = true
+            allowContentAccess = true
+            useWideViewPort = true
+            loadWithOverviewMode = true
+            setSupportZoom(false)
+            builtInZoomControls = false
+            displayZoomControls = false
+            cacheMode = WebSettings.LOAD_DEFAULT
+            mediaPlaybackRequiresUserGesture = false
+            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            userAgentString = "\${userAgentString} LocateGoDriverApp/1.0.0"
+        }
+
+        webView.addJavascriptInterface(bridge, "LocateGoNative")
+
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                progressBar.visibility = View.VISIBLE
             }
-        }
-        rootLayout.addView(startServiceBtn)
 
-        addSpacer(rootLayout, 12)
-
-        accessibilityBtn = Button(this).apply {
-            text = "تفعيل خدمة قراءة الشاشة (Accessibility)"
-            setBackgroundColor(ContextCompat.getColor(context, R.color.card_bg))
-            setTextColor(ContextCompat.getColor(context, R.color.text_primary))
-            setOnClickListener {
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            override fun onPageFinished(view: WebView?, url: String?) {
+                progressBar.visibility = View.GONE
+                syncStateToWeb()
             }
-        }
-        rootLayout.addView(accessibilityBtn)
 
-        addSpacer(rootLayout, 12)
+            @SuppressLint("WebViewClientOnReceivedSslError")
+            override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
+                handler?.proceed()
+            }
 
-        overlayBtn = Button(this).apply {
-            text = "تفعيل النافذة العائمة (Overlay Pill)"
-            setBackgroundColor(ContextCompat.getColor(context, R.color.card_bg))
-            setTextColor(ContextCompat.getColor(context, R.color.text_primary))
-            setOnClickListener {
-                if (Settings.canDrawOverlays(this@MainActivity)) {
-                    startService(Intent(this@MainActivity, FloatingOverlayService::class.java))
-                } else {
-                    startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:\$packageName")))
+            override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+                super.onReceivedError(view, request, error)
+                if (request?.isForMainFrame == true) {
+                    progressBar.visibility = View.GONE
                 }
             }
         }
-        rootLayout.addView(overlayBtn)
 
-        addSpacer(rootLayout, 12)
-
-        val batteryBtn = Button(this).apply {
-            text = "استثناء توفير الطاقة (عدم إغلاق الأداة)"
-            setBackgroundColor(ContextCompat.getColor(context, R.color.card_bg))
-            setTextColor(ContextCompat.getColor(context, R.color.text_secondary))
-            setOnClickListener {
-                requestIgnoreBatteryOptimizations()
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onGeolocationPermissionsShowPrompt(
+                origin: String?,
+                callback: GeolocationPermissions.Callback?
+            ) {
+                callback?.invoke(origin, true, false)
             }
         }
-        rootLayout.addView(batteryBtn)
+
+        val dashboardUrl = renderClient.baseUrl
+        webView.loadUrl(dashboardUrl)
     }
 
-    private fun addSpacer(layout: LinearLayout, heightDp: Int) {
-        val spacer = Space(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                (heightDp * resources.displayMetrics.density).toInt()
-            )
+    fun syncStateToWeb() {
+        lifecycleScope.launch {
+            delay(300)
+            val isRunning = LocationTrackingService.isServiceRunning
+            val isOverlay = FloatingOverlayService.isOverlayShowing
+            val lat = LocationTrackingService.currentLatitude ?: 0.0
+            val lng = LocationTrackingService.currentLongitude ?: 0.0
+
+            val jsCode = """
+                if (window.onLocateGoNativeSync) {
+                    window.onLocateGoNativeSync({
+                        isNativeApp: true,
+                        isTrackingRunning: \$isRunning,
+                        isOverlayShowing: \$isOverlay,
+                        lat: \$lat,
+                        lng: \$lng
+                    });
+                }
+            """.trimIndent()
+            webView.evaluateJavascript(jsCode, null)
         }
-        layout.addView(spacer)
+    }
+
+    fun startLocationService() {
+        val intent = Intent(this, LocationTrackingService::class.java).apply {
+            action = LocationTrackingService.ACTION_START
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
+    fun stopLocationService() {
+        val intent = Intent(this, LocationTrackingService::class.java).apply {
+            action = LocationTrackingService.ACTION_STOP
+        }
+        startService(intent)
+    }
+
+    fun requestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:\$packageName")
+                }
+                startActivity(intent)
+            } else {
+                Toast.makeText(this, "التطبيق مستثنى بالفعل من توفير الطاقة!", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun checkAndRequestPermissions() {
@@ -1141,75 +1157,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun requestBackgroundLocationIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION), 1002)
-            }
-        }
-    }
-
-    private fun requestIgnoreBatteryOptimizations() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-                startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                    data = Uri.parse("package:\$packageName")
-                })
-            } else {
-                Toast.makeText(this, "التطبيق مستثنى بالفعل من توفير الطاقة!", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun startLocationService() {
-        val intent = Intent(this, LocationTrackingService::class.java).apply {
-            action = LocationTrackingService.ACTION_START
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
-    }
-
-    private fun stopLocationService() {
-        val intent = Intent(this, LocationTrackingService::class.java).apply {
-            action = LocationTrackingService.ACTION_STOP
-        }
-        startService(intent)
-    }
-
-    private fun updateStatusDisplay() {
-        val isRunning = LocationTrackingService.isServiceRunning
-        statusTextView.text = if (isRunning) {
-            "الحالة: نشط • تتبع النطاق (2.0 كم) يعمل في الخلفية"
-        } else {
-            "الحالة: متوقف • اضغط الزر بالأسفل لتشغيل التتبع"
-        }
-        startServiceBtn.text = if (isRunning) "إيقاف خدمة التتبع" else "تشغيل خدمة التتبع (نطاق 2 كم)"
-
-        val lat = LocationTrackingService.currentLatitude
-        val lng = LocationTrackingService.currentLongitude
-        locationTextView.text = if (lat != null && lng != null) {
-            "الموقع الحي: \$lat, \$lng"
-        } else {
-            "إحداثيات المندوب: بانتظار إشارة GPS الدقيقة..."
-        }
-    }
-
-    private fun testServerPing() {
-        Toast.makeText(this@MainActivity, "جاري فحص الاتصال بسيرفر Render...", Toast.LENGTH_SHORT).show()
-        lifecycleScope.launch {
-            val pingResult = renderClient.pingServer()
-            if (pingResult.isSuccess) {
-                val lat = LocationTrackingService.currentLatitude
-                val lng = LocationTrackingService.currentLongitude
-                if (lat != null && lng != null) {
-                    renderClient.updateDriverLocation(lat, lng)
-                }
-                Toast.makeText(this@MainActivity, "✅ تم الاتصال بنجاح! (\${pingResult.getOrNull()})", Toast.LENGTH_LONG).show()
-            } else {
-                val errorMsg = pingResult.exceptionOrNull()?.message ?: "خطأ غير معروف"
-                Toast.makeText(this@MainActivity, "❌ فشل الاتصال: \$errorMsg", Toast.LENGTH_LONG).show()
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissions(
+                    arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
+                    1002
+                )
             }
         }
     }
@@ -1677,11 +1633,11 @@ class RenderApiClient(private val context: Context) {
             <span>2. مراقبة واعتراض فوري (Pure Observer • No-Swipe)</span>
           </div>
           <p className="text-[11px] text-slate-300 leading-relaxed">
-            مراقبة حدثية حية للشاشة (بدون أي سحب للشاشة إطلاقاً)، واستخراج فوري لمسافة المطعم ومسافة العميل ومقارنتها بالإعدادات، مع نقر مباشر وفوري على زر القبول (Accept) في أقل من 10ms فور مطابقة الشروط.
+            مراقبة حدثية حية للشاشة (بدون أي سحب للشاشة إطلاقاً)، وفحص مسافة العميل/الوجهة مقارنة بالحد الأقصى (مثلاً 2 كم)، مع إبقاء مسافة المطعم اختيارية ومفتوحة، والنقر المباشر والفوري على زر القبول (Accept) في أقل من 10ms فور مطابقة مسافة العميل.
           </p>
           <div className="mt-2 text-[10px] text-cyan-400 flex items-center gap-1 font-mono">
             <CheckCircle2 className="w-3 h-3" />
-            <span>نقر فوري مباشر بأقل من 10ms دون أي سحب للشاشة</span>
+            <span>الشرط: مسافة العميل ≤ الحد المحدد • مسافة المطعم مفتوحة واختيارية</span>
           </div>
         </div>
 

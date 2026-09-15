@@ -6,9 +6,11 @@ import { OrdersFeed } from './components/OrdersFeed';
 import { FloatingWidgetOverlay } from './components/FloatingWidgetOverlay';
 import { AndroidCodeGuideModal } from './components/AndroidCodeGuideModal';
 import { ServerDeployGuide } from './components/ServerDeployGuide';
+import { AndroidNativeControls } from './components/AndroidNativeControls';
 import { LocateGoSettings, LocateGoStatus, OrderItem, AppSource } from './types';
 import { INITIAL_ORDERS, APP_CONFIG } from './utils/sampleData';
 import { soundManager } from './utils/audio';
+import { getNativeBridge, isRunningInAndroidApp } from './utils/nativeBridge';
 
 export default function App() {
   const [settings, setSettings] = useState<LocateGoSettings>({
@@ -38,6 +40,65 @@ export default function App() {
     serverConnected: false,
     driverLocation: null,
   });
+
+  // ----------------------------------------------------
+  // 0. Single App Architecture: Listen for Android Bridge Sync
+  // ----------------------------------------------------
+  useEffect(() => {
+    // If inside Android App, fetch local settings from SharedPreferences
+    const bridge = getNativeBridge();
+    if (bridge) {
+      try {
+        const rawSettings = bridge.getSettingsJson();
+        if (rawSettings) {
+          const parsed = JSON.parse(rawSettings);
+          setSettings((prev) => ({
+            ...prev,
+            maxDistanceKm: parsed.maxDistanceKm ?? prev.maxDistanceKm,
+            autoAccept: parsed.autoAccept ?? prev.autoAccept,
+            soundAlerts: parsed.soundAlerts ?? prev.soundAlerts,
+            minPayoutSar: parsed.minPayoutSar ?? prev.minPayoutSar,
+            vibrationFeedback: parsed.vibrationFeedback ?? prev.vibrationFeedback,
+          }));
+        }
+
+        const rawStatus = bridge.getAndroidStatusJson();
+        if (rawStatus) {
+          const parsedStatus = JSON.parse(rawStatus);
+          if (parsedStatus.currentLatitude && parsedStatus.currentLongitude) {
+            setStatus((prev) => ({
+              ...prev,
+              isRunning: parsedStatus.isTrackingRunning ?? prev.isRunning,
+              driverLocation: {
+                lat: parsedStatus.currentLatitude,
+                lng: parsedStatus.currentLongitude,
+                updatedAt: new Date().toISOString(),
+              },
+            }));
+          }
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    // Register callback for continuous real-time sync from Kotlin MainActivity
+    window.onLocateGoNativeSync = (nativeState) => {
+      setStatus((prev) => ({
+        ...prev,
+        isRunning: nativeState.isTrackingRunning,
+        driverLocation: nativeState.lat && nativeState.lng ? {
+          lat: nativeState.lat,
+          lng: nativeState.lng,
+          updatedAt: new Date().toISOString(),
+        } : prev.driverLocation,
+      }));
+    };
+
+    return () => {
+      window.onLocateGoNativeSync = undefined;
+    };
+  }, []);
 
   // ----------------------------------------------------
   // 1. Initial Sync with Real Server API
@@ -151,7 +212,7 @@ export default function App() {
   }, [orders]);
 
   // ----------------------------------------------------
-  // 3. Master Power Toggle (Synced with Server)
+  // 3. Master Power Toggle (Synced with Server & Android Native)
   // ----------------------------------------------------
   const handleTogglePower = useCallback(async () => {
     const nextRunning = !status.isRunning;
@@ -170,6 +231,12 @@ export default function App() {
       isRunning: nextRunning,
       isMonitoringScreen: nextRunning,
     }));
+
+    // If running in Android App, notify native layer
+    const bridge = getNativeBridge();
+    if (bridge) {
+      bridge.setTrackingActive(nextRunning);
+    }
 
     try {
       await fetch('/api/status/toggle', {
@@ -198,10 +265,18 @@ export default function App() {
   }, [handleTogglePower]);
 
   // ----------------------------------------------------
-  // 4. Update Settings (Synced with Server)
+  // 4. Update Settings (Synced with Server & Android SharedPreferences)
   // ----------------------------------------------------
   const handleUpdateMaxDistance = async (km: number) => {
-    setSettings((prev) => ({ ...prev, maxDistanceKm: km }));
+    setSettings((prev) => {
+      const updated = { ...prev, maxDistanceKm: km };
+      const bridge = getNativeBridge();
+      if (bridge) {
+        bridge.saveSettings(JSON.stringify(updated));
+      }
+      return updated;
+    });
+
     try {
       await fetch('/api/settings', {
         method: 'POST',
@@ -214,7 +289,15 @@ export default function App() {
   };
 
   const handleUpdateSettings = async (newSettings: Partial<LocateGoSettings>) => {
-    setSettings((prev) => ({ ...prev, ...newSettings }));
+    setSettings((prev) => {
+      const updated = { ...prev, ...newSettings };
+      const bridge = getNativeBridge();
+      if (bridge) {
+        bridge.saveSettings(JSON.stringify(updated));
+      }
+      return updated;
+    });
+
     try {
       await fetch('/api/settings', {
         method: 'POST',
@@ -352,7 +435,15 @@ export default function App() {
         {/* VIEW 1: Main Driver Dashboard */}
         {activeTab === 'dashboard' && (
           <div className="space-y-6 animate-fadeIn">
-            {/* 1. Main Controls: Master Start/Stop & Max Distance Threshold */}
+            {/* 1. Android Native Integration Controls (Single App Mode) */}
+            <AndroidNativeControls
+              settings={settings}
+              status={status}
+              onTogglePower={handleTogglePower}
+              onUpdateSettings={handleUpdateSettings}
+            />
+
+            {/* 2. Main Controls: Master Start/Stop & Max Distance Threshold */}
             <MainControlCard
               settings={settings}
               status={status}
@@ -363,13 +454,13 @@ export default function App() {
               isLocating={isLocating}
             />
 
-            {/* 2. Live Status & Diagnostics Indicator */}
+            {/* 3. Live Status & Diagnostics Indicator */}
             <LiveStatusIndicator
               status={status}
               maxDistanceKm={settings.maxDistanceKm}
             />
 
-            {/* 3. Detected Orders Feed & History */}
+            {/* 4. Detected Orders Feed & History */}
             <OrdersFeed
               orders={orders}
               maxDistanceKm={settings.maxDistanceKm}

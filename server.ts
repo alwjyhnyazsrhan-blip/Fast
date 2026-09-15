@@ -238,24 +238,27 @@ async function startServer() {
       typeof customerLng === "number"
     ) {
       computedDistance = calculateHaversineDistanceKm(storeLat, storeLng, customerLat, customerLng);
+    } else if (typeof deliveryDistanceKm === "number" && deliveryDistanceKm > 0) {
+      // Primary criteria: Delivery / Customer distance strictly compared against max distance
+      computedDistance = Math.round(deliveryDistanceKm * 10) / 10;
+    } else if (typeof inputDistance === "number" && inputDistance > 0) {
+      // Direct evaluated distance
+      computedDistance = Math.round(inputDistance * 10) / 10;
+    } else if (typeof pickupDistanceKm === "number" && pickupDistanceKm > 0) {
+      // Pickup distance fallback
+      computedDistance = Math.round(pickupDistanceKm * 10) / 10;
     } else if (
       state.driverLocation &&
       typeof storeLat === "number" &&
       typeof storeLng === "number"
     ) {
-      // Driver to store pickup distance
+      // Driver to store distance fallback
       computedDistance = calculateHaversineDistanceKm(
         state.driverLocation.lat,
         state.driverLocation.lng,
         storeLat,
         storeLng
       );
-    } else if (typeof pickupDistanceKm === "number" && pickupDistanceKm > 0) {
-      // Specific pickup distance from restaurant
-      computedDistance = Math.round(pickupDistanceKm * 10) / 10;
-    } else if (typeof inputDistance === "number" && inputDistance > 0) {
-      // Direct distance extracted by Accessibility Service / OCR
-      computedDistance = Math.round(inputDistance * 10) / 10;
     } else {
       return res.status(400).json({
         error: "بيانات المسافة مفقودة: يجب إرسال distanceKm أو إحداثيات المتجر والعميل.",

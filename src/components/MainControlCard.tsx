@@ -298,8 +298,8 @@ export const MainControlCard: React.FC<MainControlCardProps> = ({
           <div className="flex items-center gap-2">
             <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
             <span className="text-slate-300">
-              قاعدة الفلترة في السيرفر: <strong className="text-emerald-300">قبول</strong> الطلبات التي مسافتها{' '}
-              <strong className="text-white font-mono">≤ {settings.maxDistanceKm} كم</strong>، واستبعاد غيرها.
+              معيار القبول الفوري: <strong className="text-emerald-300">مسافة العميل / الوجهة</strong>{' '}
+              <strong className="text-white font-mono">≤ {settings.maxDistanceKm} كم</strong> (مسافة المطعم مفتوحة واختيارية).
             </span>
           </div>
 

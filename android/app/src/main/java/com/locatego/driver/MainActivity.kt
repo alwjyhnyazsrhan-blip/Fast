@@ -1,34 +1,42 @@
 package com.locatego.driver
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.net.Uri
+import android.net.http.SslError
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
-import android.view.Gravity
-import android.view.ViewGroup
-import android.widget.*
+import android.view.View
+import android.webkit.*
+import android.widget.FrameLayout
+import android.widget.ProgressBar
+import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
+/**
+ * MainActivity - Single App Architecture
+ * دمج لوحة التحكم بالكامل داخل تطبيق الأندرويد كشاشة أساسية متكاملة (Web/React Integrated UI).
+ * يتم تحميل لوحة التحكم من سيرفر Render أو محلياً، مع ربطها بجسر برمجي (JavascriptInterface)
+ * للتحكم الفوري في إعدادات الأداة، تفعيل/إيقاف التتبع، فحص الطلبات، وإدارة صلاحيات النظام.
+ */
 class MainActivity : AppCompatActivity() {
 
+    private lateinit var webView: WebView
+    private lateinit var progressBar: ProgressBar
+    private lateinit var bridge: LocateGoNativeBridge
     private lateinit var renderClient: RenderApiClient
-    private lateinit var statusTextView: TextView
-    private lateinit var locationTextView: TextView
-    private lateinit var startServiceBtn: Button
-    private lateinit var overlayBtn: Button
-    private lateinit var accessibilityBtn: Button
-    private lateinit var serverUrlInput: EditText
 
     private val requestLocationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -43,178 +51,180 @@ class MainActivity : AppCompatActivity() {
         } else {
             Toast.makeText(this, "يجب منح إذن الموقع لتصفية الطلبات في نطاق 2 كم", Toast.LENGTH_LONG).show()
         }
+        syncStateToWeb()
     }
 
+    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        renderClient = RenderApiClient(this)
 
-        setupNativeUi()
+        renderClient = RenderApiClient(this)
+        bridge = LocateGoNativeBridge(this)
+
+        setupSingleAppUi()
         checkAndRequestPermissions()
+
+        // معالجة زر الرجوع في الأندرويد لتصفح الـ WebView بسلاسة
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (webView.canGoBack()) {
+                    webView.goBack()
+                } else {
+                    // تصغير التطبيق وإبقاؤه يعمل في الخلفية بدلاً من قفله
+                    moveTaskToBack(true)
+                }
+            }
+        })
     }
 
     override fun onResume() {
         super.onResume()
-        updateStatusDisplay()
+        syncStateToWeb()
     }
 
-    private fun setupNativeUi() {
-        val rootLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(48, 48, 48, 48)
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun setupSingleAppUi() {
+        val rootLayout = FrameLayout(this).apply {
             setBackgroundColor(ContextCompat.getColor(context, R.color.background_dark))
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
+        }
+
+        webView = WebView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
             )
+            setBackgroundColor(ContextCompat.getColor(context, R.color.background_dark))
         }
 
-        val scroll = ScrollView(this).apply {
-            addView(rootLayout)
-        }
-        setContentView(scroll)
-
-        // Title
-        val titleText = TextView(this).apply {
-            text = "⚡ Locate Go Driver Native"
-            textSize = 22f
-            setTextColor(ContextCompat.getColor(context, R.color.text_primary))
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER_HORIZONTAL
-        }
-        rootLayout.addView(titleText)
-
-        val subtitleText = TextView(this).apply {
-            text = "اعتراض الطلبات في نطاق 2.0 كم والربط المباشر مع سيرفر Render"
-            textSize = 13f
-            setTextColor(ContextCompat.getColor(context, R.color.text_secondary))
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(0, 8, 0, 32)
-        }
-        rootLayout.addView(subtitleText)
-
-        // Status Card
-        statusTextView = TextView(this).apply {
-            text = "الحالة: جاري الفحص..."
-            textSize = 14f
-            setTextColor(ContextCompat.getColor(context, R.color.primary))
-            setBackgroundColor(ContextCompat.getColor(context, R.color.card_bg))
-            setPadding(32, 24, 32, 24)
-        }
-        rootLayout.addView(statusTextView)
-
-        locationTextView = TextView(this).apply {
-            text = "إحداثيات المندوب: جاري التقاط GPS..."
-            textSize = 12f
-            setTextColor(ContextCompat.getColor(context, R.color.text_secondary))
-            setPadding(0, 16, 0, 24)
-        }
-        rootLayout.addView(locationTextView)
-
-        // Render Server URL Input
-        val urlLabel = TextView(this).apply {
-            text = "رابط خادم Render المباشر:"
-            textSize = 12f
-            setTextColor(ContextCompat.getColor(context, R.color.text_secondary))
-        }
-        rootLayout.addView(urlLabel)
-
-        serverUrlInput = EditText(this).apply {
-            setText(renderClient.baseUrl)
-            setTextColor(ContextCompat.getColor(context, R.color.text_primary))
-            setBackgroundColor(ContextCompat.getColor(context, R.color.card_bg))
-            setPadding(24, 20, 24, 20)
-            textSize = 13f
-            isSingleLine = true
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
-        }
-        rootLayout.addView(serverUrlInput)
-
-        val saveUrlBtn = Button(this).apply {
-            text = "حفظ واختبار اتصال السيرفر"
-            setBackgroundColor(ContextCompat.getColor(context, R.color.accent))
-            setTextColor(ContextCompat.getColor(context, R.color.background_dark))
-            setOnClickListener {
-                val newUrl = serverUrlInput.text.toString().trim()
-                renderClient.baseUrl = newUrl
-                testServerPing()
+        progressBar = ProgressBar(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = android.view.Gravity.CENTER
             }
+            visibility = View.VISIBLE
         }
-        rootLayout.addView(saveUrlBtn)
 
-        addSpacer(rootLayout, 24)
+        rootLayout.addView(webView)
+        rootLayout.addView(progressBar)
+        setContentView(rootLayout)
 
-        // Buttons
-        startServiceBtn = Button(this).apply {
-            text = "تشغيل خدمة التتبع (نطاق 2 كم)"
-            setBackgroundColor(ContextCompat.getColor(context, R.color.primary))
-            setTextColor(ContextCompat.getColor(context, R.color.background_dark))
-            setOnClickListener {
-                if (LocationTrackingService.isServiceRunning) {
-                    stopLocationService()
-                } else {
-                    startLocationService()
-                }
-                updateStatusDisplay()
+        // إعدادات الـ WebView المتقدمة لتشغيل واجهة React الحديثة بكامل قدراتها
+        webView.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            databaseEnabled = true
+            allowFileAccess = true
+            allowContentAccess = true
+            useWideViewPort = true
+            loadWithOverviewMode = true
+            setSupportZoom(false)
+            builtInZoomControls = false
+            displayZoomControls = false
+            cacheMode = WebSettings.LOAD_DEFAULT
+            mediaPlaybackRequiresUserGesture = false
+            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            userAgentString = "${userAgentString} LocateGoDriverApp/1.0.0"
+        }
+
+        // ربط الجسر البرمجي بين Kotlin والـ Web
+        webView.addJavascriptInterface(bridge, "LocateGoNative")
+
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                progressBar.visibility = View.VISIBLE
             }
-        }
-        rootLayout.addView(startServiceBtn)
 
-        addSpacer(rootLayout, 12)
-
-        accessibilityBtn = Button(this).apply {
-            text = "تفعيل خدمة قراءة الشاشة (Accessibility)"
-            setBackgroundColor(ContextCompat.getColor(context, R.color.card_bg))
-            setTextColor(ContextCompat.getColor(context, R.color.text_primary))
-            setOnClickListener {
-                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                startActivity(intent)
+            override fun onPageFinished(view: WebView?, url: String?) {
+                progressBar.visibility = View.GONE
+                syncStateToWeb()
             }
-        }
-        rootLayout.addView(accessibilityBtn)
 
-        addSpacer(rootLayout, 12)
+            @SuppressLint("WebViewClientOnReceivedSslError")
+            override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
+                handler?.proceed() // تجاوز تحذيرات SSL للاتصال الداخلي الآمن
+            }
 
-        overlayBtn = Button(this).apply {
-            text = "تفعيل النافذة العائمة (Overlay Pill)"
-            setBackgroundColor(ContextCompat.getColor(context, R.color.card_bg))
-            setTextColor(ContextCompat.getColor(context, R.color.text_primary))
-            setOnClickListener {
-                if (Settings.canDrawOverlays(this@MainActivity)) {
-                    val intent = Intent(this@MainActivity, FloatingOverlayService::class.java)
-                    startService(intent)
-                } else {
-                    val intent = Intent(
-                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:$packageName")
-                    )
-                    startActivity(intent)
+            override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+                super.onReceivedError(view, request, error)
+                if (request?.isForMainFrame == true) {
+                    progressBar.visibility = View.GONE
                 }
             }
         }
-        rootLayout.addView(overlayBtn)
 
-        addSpacer(rootLayout, 12)
-
-        val batteryBtn = Button(this).apply {
-            text = "استثناء توفير الطاقة (عدم إغلاق الأداة)"
-            setBackgroundColor(ContextCompat.getColor(context, R.color.card_bg))
-            setTextColor(ContextCompat.getColor(context, R.color.text_secondary))
-            setOnClickListener {
-                requestIgnoreBatteryOptimizations()
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onGeolocationPermissionsShowPrompt(
+                origin: String?,
+                callback: GeolocationPermissions.Callback?
+            ) {
+                // منح إذن الموقع تلقائياً لواجهة الويب داخل التطبيق
+                callback?.invoke(origin, true, false)
             }
         }
-        rootLayout.addView(batteryBtn)
+
+        // تحميل واجهة لوحة التحكم من سيرفر Render المباشر
+        val dashboardUrl = renderClient.baseUrl
+        webView.loadUrl(dashboardUrl)
     }
 
-    private fun addSpacer(layout: LinearLayout, heightDp: Int) {
-        val spacer = Space(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                (heightDp * resources.displayMetrics.density).toInt()
-            )
+    /**
+     * إرسال حالة النظام والموقع الجغرافي الحي مباشرة إلى واجهة React داخل الـ WebView
+     */
+    fun syncStateToWeb() {
+        lifecycleScope.launch {
+            delay(300)
+            val isRunning = LocationTrackingService.isServiceRunning
+            val isOverlay = FloatingOverlayService.isOverlayShowing
+            val lat = LocationTrackingService.currentLatitude ?: 0.0
+            val lng = LocationTrackingService.currentLongitude ?: 0.0
+
+            val jsCode = """
+                if (window.onLocateGoNativeSync) {
+                    window.onLocateGoNativeSync({
+                        isNativeApp: true,
+                        isTrackingRunning: $isRunning,
+                        isOverlayShowing: $isOverlay,
+                        lat: $lat,
+                        lng: $lng
+                    });
+                }
+            """.trimIndent()
+            webView.evaluateJavascript(jsCode, null)
         }
-        layout.addView(spacer)
+    }
+
+    fun startLocationService() {
+        val intent = Intent(this, LocationTrackingService::class.java).apply {
+            action = LocationTrackingService.ACTION_START
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
+    fun stopLocationService() {
+        val intent = Intent(this, LocationTrackingService::class.java).apply {
+            action = LocationTrackingService.ACTION_STOP
+        }
+        startService(intent)
+    }
+
+    fun requestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            } else {
+                Toast.makeText(this, "التطبيق مستثنى بالفعل من توفير الطاقة!", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun checkAndRequestPermissions() {
@@ -245,88 +255,10 @@ class MainActivity : AppCompatActivity() {
                     Manifest.permission.ACCESS_BACKGROUND_LOCATION
                 ) != PackageManager.PERMISSION_GRANTED
             ) {
-                // Request background location
                 requestPermissions(
                     arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
                     1002
                 )
-            }
-        }
-    }
-
-    private fun requestIgnoreBatteryOptimizations() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                    data = Uri.parse("package:$packageName")
-                }
-                startActivity(intent)
-            } else {
-                Toast.makeText(this, "التطبيق مستثنى بالفعل من توفير الطاقة!", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun startLocationService() {
-        val intent = Intent(this, LocationTrackingService::class.java).apply {
-            action = LocationTrackingService.ACTION_START
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
-    }
-
-    private fun stopLocationService() {
-        val intent = Intent(this, LocationTrackingService::class.java).apply {
-            action = LocationTrackingService.ACTION_STOP
-        }
-        startService(intent)
-    }
-
-    private fun updateStatusDisplay() {
-        val isRunning = LocationTrackingService.isServiceRunning
-        statusTextView.text = if (isRunning) {
-            "الحالة: نشط • تتبع النطاق (2.0 كم) يعمل في الخلفية"
-        } else {
-            "الحالة: متوقف • اضغط الزر بالأسفل لتشغيل التتبع"
-        }
-        startServiceBtn.text = if (isRunning) "إيقاف خدمة التتبع" else "تشغيل خدمة التتبع (نطاق 2 كم)"
-
-        val lat = LocationTrackingService.currentLatitude
-        val lng = LocationTrackingService.currentLongitude
-        locationTextView.text = if (lat != null && lng != null) {
-            "الموقع الحي: $lat, $lng"
-        } else {
-            "إحداثيات المندوب: بانتظار إشارة GPS الدقيقة..."
-        }
-    }
-
-    private fun testServerPing() {
-        Toast.makeText(this@MainActivity, "جاري فحص الاتصال بسيرفر Render...", Toast.LENGTH_SHORT).show()
-        lifecycleScope.launch {
-            val pingResult = renderClient.pingServer()
-            if (pingResult.isSuccess) {
-                // أيضاً نقوم بتحديث موقع المندوب الحي إن توفر
-                val lat = LocationTrackingService.currentLatitude
-                val lng = LocationTrackingService.currentLongitude
-                if (lat != null && lng != null) {
-                    renderClient.updateDriverLocation(lat, lng)
-                }
-                Toast.makeText(
-                    this@MainActivity,
-                    "✅ تم الاتصال بنجاح! (${pingResult.getOrNull()})",
-                    Toast.LENGTH_LONG
-                ).show()
-            } else {
-                val errorMsg = pingResult.exceptionOrNull()?.message ?: "خطأ غير معروف"
-                Toast.makeText(
-                    this@MainActivity,
-                    "❌ فشل الاتصال: $errorMsg",
-                    Toast.LENGTH_LONG
-                ).show()
             }
         }
     }

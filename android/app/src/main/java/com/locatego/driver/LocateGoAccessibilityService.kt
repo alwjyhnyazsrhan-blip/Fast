@@ -24,14 +24,11 @@ import java.util.regex.Pattern
  *
  * التعديلات الحصرية:
  * 1. إلغاء ميزة السحب التلقائي (Swipe Down / Swipe Loop) نهائياً وبشكل كامل. لا يتم تنفيذ أي حركة سحب للشاشة.
- * 2. مراقبة شاشة تطبيقي Locate Go و Locate CC عند ظهور أي طلب جديد واستخراج التفاصيل بدقة متناهية:
- *    - مسافة المطعم / الاستلام (Pickup Distance)
- *    - مسافة العميل / التوصيل (Delivery Distance)
- *    - المسافة الإجمالية وسعر وأجر التوصيل (Payout in SAR)
- *    - اسم المتجر والحي أو وجهة التوصيل
- * 3. مقارنة فورية ومحلية لجميع المعايير مع إعدادات السائق المحددة (الحد الأقصى للمسافة، مسافة المطعم، أجر الطلب).
- * 4. بمجرد مطابقة الشروط، يتم النقر الفوري والمباشر على زر القبول ("Accept") في أقل من 10ms دون أي تأخير،
- *    ودون انتظار رد الشبكة، مع إرسال تقرير الطلب لسيرفر Render في الخلفية.
+ * 2. معيار الفحص والقبول الحصري:
+ *    - الشرط الأساسي والوحيد للمسافة: "مسافة العميل / الوجهة" (Delivery Distance) <= الحد الأقصى للمسافة المحددة (مثلاً 2 كم).
+ *    - "مسافة المطعم / الاستلام" (Pickup Distance): اختيارية ومفتوحة تماماً بغض النظر عن قيمتها، بحيث يتم قبول الطلب فوراً حتى لو كان المطعم بعيداً.
+ * 3. بمجرد ظهور الطلب ومطابقته للشرط (مسافة العميل <= الحد الأقصى)، يتم النقر المباشر والفوري على زر القبول ("Accept") في أقل من 10ms دون أي تأخير،
+ *    ودون الحاجة لأي عملية تحديث أو سحب للشاشة، مع إرسال تقرير الطلب لسيرفر Render في الخلفية.
  */
 class LocateGoAccessibilityService : AccessibilityService() {
 
@@ -185,9 +182,11 @@ class LocateGoAccessibilityService : AccessibilityService() {
             }
         }
 
-        // المسافة الأساسية لتقييم الطلب
-        val primaryDistanceKm = pickupDistKm ?: generalDistKm ?: deliveryDistKm ?: return
-        if (primaryDistanceKm <= 0.0) return
+        // المسافة الأساسية لتقييم الطلب:
+        // الشرط الأساسي والوحيد للقبول هو أن تكون "مسافة العميل / الوجهة" <= الحد الأقصى المحدد في الإعدادات (مثلاً 2 كم).
+        // أما "مسافة المطعم / الاستلام" فتكون اختيارية ومفتوحة بغض النظر عن قيمتها (حتى لو كان المطعم بعيداً).
+        val targetEvaluationDistanceKm = deliveryDistKm ?: generalDistKm ?: pickupDistKm ?: return
+        if (targetEvaluationDistanceKm <= 0.0) return
 
         // 4. استخراج رقم الطلب إن وجد
         var extractedOrderId: String? = null
@@ -210,27 +209,29 @@ class LocateGoAccessibilityService : AccessibilityService() {
         val customerDistrict = extractCustomerDistrict(joinedContent, orderTexts)
 
         // 8. منع تكرار النقر على نفس الطلب خلال 8 ثوانٍ لتفادي النقر المزدوج غير الضروري
-        val deduplicationKey = "${extractedOrderId ?: ""}|$primaryDistanceKm|$payoutSar|$storeName"
+        val deduplicationKey = "${extractedOrderId ?: ""}|$targetEvaluationDistanceKm|$payoutSar|$storeName"
         val now = System.currentTimeMillis()
         if (processedOrdersCache[deduplicationKey]?.let { now - it < 8_000 } == true) return
 
         // قراءة إعدادات السائق المحددة محلياً من SharedPreferences
         val prefs = getSharedPreferences("locate_go_prefs", Context.MODE_PRIVATE)
         val maxAllowedKm = prefs.getFloat("max_distance_km", 2.0f).toDouble()
-        val maxPickupDistanceKm = prefs.getFloat("max_pickup_distance_km", maxAllowedKm.toFloat()).toDouble()
         val minPayoutSar = prefs.getFloat("min_payout_sar", 0.0f).toDouble()
         val isAutoAcceptEnabled = prefs.getBoolean("auto_accept", true)
 
         Log.i(
             "LocateGoService",
-            "🎯 NEW OFFER DETECTED: Store='$storeName' | PickupDist=${pickupDistKm ?: "N/A"} km | DeliveryDist=${deliveryDistKm ?: "N/A"} km | PrimaryDist=$primaryDistanceKm km (Max: $maxAllowedKm km) | Payout=$payoutSar SAR (Min: $minPayoutSar SAR)"
+            "🎯 NEW OFFER DETECTED: Store='$storeName' | DeliveryDist=${deliveryDistKm ?: "N/A"} km (Strict Max: $maxAllowedKm km) | PickupDist=${pickupDistKm ?: "N/A"} km (Open/Optional) | EvalDist=$targetEvaluationDistanceKm km | Payout=$payoutSar SAR"
         )
 
-        // التحقق من مطابقة الشروط بدقة عالية
-        val isPickupWithinLimit = pickupDistKm == null || pickupDistKm <= maxPickupDistanceKm
-        val isPrimaryWithinLimit = primaryDistanceKm <= maxAllowedKm
+        // =========================================================================
+        // قاعدة الفحص والقبول الصارمة وفق متطلبات السائق:
+        // 1. مسافة العميل / الوجهة <= الحد الأقصى للمسافة (مثلاً 2 كم).
+        // 2. مسافة المطعم مفتوحة واختيارية تماماً ولا تعطل القبول أبداً.
+        // =========================================================================
+        val isDeliveryWithinLimit = targetEvaluationDistanceKm <= maxAllowedKm
         val isPayoutAccepted = payoutSar >= minPayoutSar
-        val isOrderMatching = isAutoAcceptEnabled && isPickupWithinLimit && isPrimaryWithinLimit && isPayoutAccepted
+        val isOrderMatching = isAutoAcceptEnabled && isDeliveryWithinLimit && isPayoutAccepted
 
         val resolvedAppName = if (packageName.contains("locatcc", true)) "Locate CC" else "Locate Go"
 
@@ -243,7 +244,10 @@ class LocateGoAccessibilityService : AccessibilityService() {
             // تنفيذ النقر المباشر والفوري على زر القبول ("Accept") دون أي تأخير إطلاقاً
             // =========================================================================
             val clickSuccess = executeInstantDirectAccept(root)
-            Log.i("LocateGoService", "⚡⚡ ZERO-DELAY ACCEPT TRIGGERED! Click success = $clickSuccess for order at $storeName")
+            Log.i(
+                "LocateGoService",
+                "⚡⚡ ZERO-DELAY ACCEPT TRIGGERED! Click success = $clickSuccess for order at $storeName (Customer dist: ${deliveryDistKm ?: targetEvaluationDistanceKm} km <= $maxAllowedKm km, Restaurant dist: ${pickupDistKm ?: "N/A"} km - Open)"
+            )
 
             // تنبيه صوتي واهتزاز فوري للمندوب بنجاح القبول
             notifyDriverAccepted()
@@ -253,7 +257,7 @@ class LocateGoAccessibilityService : AccessibilityService() {
                 renderClient.evaluateOrder(
                     appName = resolvedAppName,
                     storeName = storeName,
-                    distanceKm = primaryDistanceKm,
+                    distanceKm = targetEvaluationDistanceKm,
                     payoutSar = payoutSar,
                     orderId = extractedOrderId,
                     customerDistrict = customerDistrict,
@@ -266,11 +270,10 @@ class LocateGoAccessibilityService : AccessibilityService() {
                 isEvaluatingOrder.set(false)
             }
         } else {
-            // إذا لم تطابق المسافة أو الأجر الشروط المحددة
+            // إذا لم تطابق مسافة العميل الحد الأقصى
             processedOrdersCache[deduplicationKey] = now
             val rejectReason = when {
-                !isPickupWithinLimit -> "مسافة المطعم ($pickupDistKm كم) تتجاوز الحد الأقصى ($maxPickupDistanceKm كم)"
-                !isPrimaryWithinLimit -> "مسافة الطلب ($primaryDistanceKm كم) تتجاوز النطاق المحدد ($maxAllowedKm كم)"
+                !isDeliveryWithinLimit -> "مسافة العميل/الوجهة (${deliveryDistKm ?: targetEvaluationDistanceKm} كم) تتجاوز الحد الأقصى المحدد ($maxAllowedKm كم)"
                 !isPayoutAccepted -> "أجر التوصيل ($payoutSar ر.س) أقل من الحد الأدنى ($minPayoutSar ر.س)"
                 else -> "القبول التلقائي متوقف في الإعدادات"
             }
@@ -278,12 +281,12 @@ class LocateGoAccessibilityService : AccessibilityService() {
             Log.w("LocateGoService", "🚫 ORDER REJECTED LOCALLY: $rejectReason")
             notifyDriverRejected()
 
-            // إبلاغ السيرفر بسبب الرفض لتوثيق الإحصائيات
+            // إبلاغ السيرفر لتوثيق الإحصائيات في الخلفية
             serviceScope.launch {
                 renderClient.evaluateOrder(
                     appName = resolvedAppName,
                     storeName = storeName,
-                    distanceKm = primaryDistanceKm,
+                    distanceKm = targetEvaluationDistanceKm,
                     payoutSar = payoutSar,
                     orderId = extractedOrderId,
                     customerDistrict = customerDistrict,
