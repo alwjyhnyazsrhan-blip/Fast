@@ -21,6 +21,22 @@ class LocateGoNativeBridge(private val activity: MainActivity) {
     private val prefs = activity.getSharedPreferences("locate_go_prefs", Context.MODE_PRIVATE)
 
     /**
+     * استرجاع معرف الجهاز المعزول الخاص بهذا الهاتف
+     */
+    @JavascriptInterface
+    fun getDeviceId(): String {
+        return RenderApiClient(activity).deviceId
+    }
+
+    /**
+     * التحقق من أمان بيئة التشغيل ومكافحة الروت والتلصص
+     */
+    @JavascriptInterface
+    fun isEnvironmentSecure(): Boolean {
+        return SecurityHardener.isEnvironmentSecure(activity)
+    }
+
+    /**
      * استرجاع الإعدادات الحالية من الذاكرة المحلية لأندرويد إلى واجهة الويب
      */
     @JavascriptInterface

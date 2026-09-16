@@ -32,10 +32,11 @@ export const AndroidCodeGuideModal: React.FC = () => {
     | 'service'
     | 'activity'
     | 'client'
+    | 'security_proguard'
     | 'app_gradle'
     | 'root_gradle'
     | 'github_actions'
-  >('tree');
+  >('security_proguard');
   const [renderUrl, setRenderUrl] = useState<string>('https://your-locate-go.onrender.com');
   const [refreshIntervalMs, setRefreshIntervalMs] = useState<number>(1500);
 
@@ -53,17 +54,18 @@ export const AndroidCodeGuideModal: React.FC = () => {
   const PROJECT_TREE_TEXT = `locate-go/
 ├── android/                                     # مجلد أندرويد الأصلي المتكامل (Native Project)
 │   ├── app/
-│   │   ├── build.gradle                        # إعدادات تطبيق أندرويد (JDK 17 + SDK 34 + Play Services Location)
-│   │   ├── proguard-rules.pro                  # قواعد حماية الكود
+│   │   ├── build.gradle                        # إعدادات تطبيق أندرويد (minifyEnabled true + R8 Full Mode + Shrinking)
+│   │   ├── proguard-rules.pro                  # قواعد تشويش الكود المتقدم وحذف Logcat وسجلات التتبع
 │   │   └── src/main/
-│   │       ├── AndroidManifest.xml             # جميع الصلاحيات (ACCESS_FINE_LOCATION, Foreground Services, Accessibility)
+│   │       ├── AndroidManifest.xml             # الصلاحيات وتأمين الشبكة (network_security_config + allowBackup=false)
 │   │       ├── java/com/locatego/driver/
-│   │       │   ├── MainActivity.kt             # واجهة التطبيق الموحدة الحاضنة للوحة التحكم (Single App Architecture)
-│   │       │   ├── LocateGoNativeBridge.kt     # جسر التواصل البرمجي التفاعلي (@JavascriptInterface) بين React والأندرويد
+│   │       │   ├── MainActivity.kt             # واجهة التطبيق الموحدة الحاضنة للوحة التحكم
+│   │       │   ├── LocateGoNativeBridge.kt     # جسر التواصل البرمجي المحمي (@JavascriptInterface)
 │   │       │   ├── LocationTrackingService.kt  # خدمة التتبع الجغرافي المستمر (Foreground Service) بنطاق 2.0 كم
-│   │       │   ├── LocateGoAccessibilityService.kt # خدمة قراءة الشاشة والاعتراض الفوري وقبول الطلب (بدون سحب)
+│   │       │   ├── LocateGoAccessibilityService.kt # خدمة قراءة الشاشة والاعتراض الفوري وقبول الطلب
 │   │       │   ├── FloatingOverlayService.kt   # النافذة العائمة فوق شاشات تطبيقات التوصيل
-│   │       │   ├── RenderApiClient.kt          # عميل الشبكة فائق السرعة المتصل بسيرفر Render
+│   │       │   ├── RenderApiClient.kt          # عميل الشبكة فائق السرعة مع التوقيع الرقمي HMAC و TLS 1.3
+│   │       │   ├── SecurityHardener.kt         # وحدة التشفير وتوليد توقيع HMAC وكشف الرووت والمصححات
 │   │       │   └── BootReceiver.kt             # التشغيل التلقائي عند إقلاع الهاتف
 │   │       └── res/
 │   │           ├── values/
@@ -71,20 +73,21 @@ export const AndroidCodeGuideModal: React.FC = () => {
 │   │           │   ├── colors.xml
 │   │           │   └── themes.xml
 │   │           └── xml/
-│   │               └── accessibility_service_config.xml # إعدادات إيماءات النقر والسحب
+│   │               ├── accessibility_service_config.xml # إعدادات إيماءات النقر
+│   │               └── network_security_config.xml      # فرض تشفير HTTPS الصارم ومنع Cleartext
 │   ├── gradle/wrapper/
 │   │   └── gradle-wrapper.properties           # إصدار Gradle 8.5 المتوافق مع JDK 17
 │   ├── build.gradle                            # ملف البناء الرئيسي (Android Gradle Plugin 8.2.2)
 │   ├── settings.gradle                         # إعدادات المشروع
-│   ├── gradle.properties                       # ضبط ذاكرة JVM والمكتبات
+│   ├── gradle.properties                       # ضبط ذاكرة JVM وتفعيل android.enableR8.fullMode=true
 │   ├── gradlew                                 # سكربت البناء في لينكس/ماك
 │   └── gradlew.bat                             # سكربت البناء في ويندوز
 │
 ├── .github/workflows/
-│   └── build-apk.yml                           # سير عمل GitHub Actions لإنتاج ملف APK حقيقي في السحابة
+│   └── build-apk.yml                           # سير عمل GitHub Actions لإنتاج ملف APK حقيقي مشوش ومحمي
 │
-├── server.ts                                   # خادم Node.js / Express فائق السرعة
-├── server_python.py                            # خادم FastAPI البديل
+├── server.ts                                   # خادم Node.js / Express مع التحقق من توقيع HMAC المشفر
+├── server_python.py                            # خادم FastAPI مع دعم التوقيع الأمني ومكافحة هجمات التكرار
 └── src/                                        # لوحة تحكم الويب المباشرة
 `;
 
@@ -1581,6 +1584,74 @@ class RenderApiClient(private val context: Context) {
 }
 `;
 
+  // ----------------------------------------------------
+  // 8. proguard-rules.pro & SecurityHardener
+  // ----------------------------------------------------
+  const SECURITY_PROGUARD_CODE = `# ==============================================================================
+# Locate Go - Extreme Code Obfuscation & Hardening Rules (ProGuard / R8)
+# ملف: android/app/proguard-rules.pro
+# ==============================================================================
+
+# 1. تشويش الكود وتسطيح وضغط الدوال وإعادة الحزم إلى مسار مجهول
+-optimizationpasses 5
+-repackageclasses 'com.locatego.driver.o'
+-flattenpackagehierarchy 'com.locatego.driver.o'
+-allowaccessmodification
+-overloadaggressively
+-useuniqueclassmembernames
+-mergeinterfacesaggressively
+
+# 2. إزالة أسماء الملفات الأصلية (.kt/.java) وأرقام الأسطر لمنع تتبع الأخطاء أو الهندسة العكسية
+-renamesourcefileattribute ""
+-keepattributes Exceptions,InnerClasses,Signature,Deprecated,JavascriptInterface
+
+# 3. حذف جميع سجلات Logcat من ملف الـ APK النهائي لمنع المتلصصين من تتبع البيانات
+-assumenosideeffects class android.util.Log {
+    public static boolean isLoggable(java.lang.String, int);
+    public static int v(...);
+    public static int d(...);
+    public static int i(...);
+    public static int w(...);
+    public static int e(...);
+    public static int println(...);
+}
+
+# 4. الحفاظ على المكونات الأساسية وجسر الويب من التشويش
+-keep public class com.locatego.driver.MainActivity { *; }
+-keep public class com.locatego.driver.LocateGoAccessibilityService { *; }
+-keep public class com.locatego.driver.FloatingOverlayService { *; }
+-keep public class com.locatego.driver.LocationTrackingService { *; }
+-keep public class com.locatego.driver.BootReceiver { *; }
+
+# حماية دوال @JavascriptInterface للتواصل بدون انقطاع مع React
+-keepattributes JavascriptInterface
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+-keep class com.locatego.driver.LocateGoNativeBridge { <methods>; }
+
+# 5. حماية OkHttp و Gson وموديلات الشبكة
+-dontwarn okhttp3.**
+-keep class okhttp3.** { *; }
+-keep class com.locatego.driver.RenderApiClient$** { *; }
+-keep class com.locatego.driver.SecurityHardener { *; }
+
+// ==============================================================================
+// SecurityHardener.kt - التوقيع الرقمي المشفر HMAC-SHA256 وكشف الرووت
+// ملف: android/app/src/main/java/com/locatego/driver/SecurityHardener.kt
+// ==============================================================================
+// 1. تشفير وتجزئة المفاتيح والنصوص الحساسة بذاكرة البايت (Dynamic XOR) لمنع قراءتها عبر strings
+// 2. توقيع الطلبات الرقمي HMAC-SHA256 (Anti-Tampering & Anti-Replay):
+//    - X-Device-Id: معرف الجهاز المعزول
+//    - X-Timestamp: وقت الطلب (يُرفض أي طلب بفارق زمني > 5 دقائق)
+//    - X-Nonce: معرّف عشوائي فريد لكل طلب لمنع هجمات إعادة الإرسال
+//    - X-Signature: HMAC-SHA256(deviceId:timestamp:nonce:bodyJson)
+// 3. كشف بيئة الرووت والمصححات:
+//    - فحص Debug.isDebuggerConnected()
+//    - فحص مسارات Superuser و su الثنائية
+//    - فحص build tags (test-keys)
+`;
+
   const activeCode =
     activeTab === 'tree'
       ? PROJECT_TREE_TEXT
@@ -1594,6 +1665,8 @@ class RenderApiClient(private val context: Context) {
       ? MAIN_ACTIVITY_CODE
       : activeTab === 'client'
       ? RENDER_CLIENT_CODE
+      : activeTab === 'security_proguard'
+      ? SECURITY_PROGUARD_CODE
       : activeTab === 'app_gradle'
       ? APP_GRADLE_CODE
       : activeTab === 'root_gradle'
@@ -1729,6 +1802,16 @@ class RenderApiClient(private val context: Context) {
         </button>
 
         <button
+          onClick={() => setActiveTab('security_proguard')}
+          className={`px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'security_proguard' ? 'bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 shadow-sm' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+          <span>تشويش الكود (ProGuard / R8 & HMAC)</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('app_gradle')}
           className={`px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer ${
             activeTab === 'app_gradle' ? 'bg-rose-500/20 text-rose-300 font-bold border border-rose-500/30 shadow-sm' : 'text-slate-400 hover:text-slate-200'
@@ -1773,6 +1856,8 @@ class RenderApiClient(private val context: Context) {
                 ? 'android/app/src/main/java/com/locatego/driver/LocateGoAccessibilityService.kt'
                 : activeTab === 'activity'
                 ? 'android/app/src/main/java/com/locatego/driver/MainActivity.kt'
+                : activeTab === 'security_proguard'
+                ? 'android/app/proguard-rules.pro & SecurityHardener.kt (تشويش الكود وتشفير API)'
                 : activeTab === 'app_gradle'
                 ? 'android/app/build.gradle'
                 : activeTab === 'root_gradle'

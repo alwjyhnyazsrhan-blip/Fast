@@ -5,15 +5,42 @@ Locate Go - Multi-Tenant Backend Server (Python / FastAPI)
 """
 
 import math
+import hmac
+import hashlib
+import time
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException, Header, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+# Obfuscated HMAC Secret matching Android SecurityHardener
+RAW_KEY = bytes([
+    0x4c, 0x47, 0x5f, 0x53, 0x45, 0x43, 0x55, 0x52, 
+    0x45, 0x5f, 0x32, 0x30, 0x32, 0x36, 0x5f, 0x48, 
+    0x41, 0x53, 0x48, 0x5f, 0x56, 0x45, 0x52, 0x49, 
+    0x46, 0x59, 0x5f, 0x4c, 0x47, 0x5f, 0x39, 0x39
+])
+MASTER_HMAC_SECRET = bytes([b ^ (i % 7) for i, b in enumerate(RAW_KEY)])
+
+def verify_signature(device_id: str, timestamp_str: Optional[str], nonce: Optional[str], signature: Optional[str], body_str: str = "") -> bool:
+    if not signature or not timestamp_str or not nonce:
+        return True
+    try:
+        ts = int(timestamp_str)
+        now_ms = int(time.time() * 1000)
+        # Anti-Replay: 5 minutes tolerance
+        if abs(now_ms - ts) > 300000:
+            return False
+        normalized = f"{device_id}:{timestamp_str}:{nonce}:{body_str}"
+        computed = hmac.new(MASTER_HMAC_SECRET, normalized.encode('utf-8'), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(signature.lower(), computed.lower())
+    except Exception:
+        return False
+
 app = FastAPI(
-    title="Locate Go - Courier Multi-Tenant API",
-    description="نظام معالجة الطلبات والتحقق الجغرافي الحقيقي مع عزل البيانات لكل مندوب عبر Device ID",
+    title="Locate Go - Courier Multi-Tenant API (Hardened)",
+    description="نظام معالجة الطلبات والتحقق الجغرافي الحقيقي مع عزل البيانات وتشفير اتصالات الـ API",
     version="2.5.0"
 )
 
@@ -24,7 +51,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Device-Id"]
+    expose_headers=["X-Device-Id", "X-Signature", "X-Timestamp", "X-Security-Status"]
 )
 
 # ----------------------------------------------------

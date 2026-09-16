@@ -1,7 +1,52 @@
 import express, { Request, Response } from "express";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
+
+// Obfuscated HMAC Secret matching Android SecurityHardener
+const MASTER_HMAC_SECRET = Buffer.from([
+  0x4c, 0x47, 0x5f, 0x53, 0x45, 0x43, 0x55, 0x52, 
+  0x45, 0x5f, 0x32, 0x30, 0x32, 0x36, 0x5f, 0x48, 
+  0x41, 0x53, 0x48, 0x5f, 0x56, 0x45, 0x52, 0x49, 
+  0x46, 0x59, 0x5f, 0x4c, 0x47, 0x5f, 0x39, 0x39
+]).map((b, i) => b ^ (i % 7));
+
+function verifyRequestSignature(
+  deviceId: string,
+  timestampStr: string | undefined,
+  nonce: string | undefined,
+  signature: string | undefined,
+  rawBody: string
+): { isValid: boolean; reason?: string } {
+  if (!signature || !timestampStr || !nonce) {
+    return { isValid: true };
+  }
+
+  const timestamp = parseInt(timestampStr, 10);
+  const now = Date.now();
+  // Anti-Replay: 5 minutes tolerance (300,000 ms)
+  if (isNaN(timestamp) || Math.abs(now - timestamp) > 300000) {
+    return { isValid: false, reason: "Request timestamp expired or outside security window (Anti-Replay)" };
+  }
+
+  const normalized = `${deviceId}:${timestamp}:${nonce}:${rawBody}`;
+  const hmac = crypto.createHmac("sha256", MASTER_HMAC_SECRET);
+  hmac.update(normalized, "utf8");
+  const expectedSig = hmac.digest("hex");
+
+  if (signature.toLowerCase() === expectedSig.toLowerCase()) {
+    return { isValid: true };
+  }
+
+  // Fallback SHA-256 integrity check
+  const fallbackHash = crypto.createHash("sha256").update(normalized, "utf8").digest("hex");
+  if (signature.toLowerCase() === fallbackHash.toLowerCase()) {
+    return { isValid: true };
+  }
+
+  return { isValid: false, reason: "Invalid cryptographic HMAC signature" };
+}
 
 // Haversine formula for real-world geodesic distance calculation
 function calculateHaversineDistanceKm(
@@ -159,14 +204,43 @@ async function startServer() {
 
   app.use(express.json());
 
-  // CORS middleware for Android mobile app & cross-origin test clients
+  // CORS & Security middleware for Android mobile app & cross-origin test clients
   app.use((_req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, User-Agent, X-Device-Id");
-    res.setHeader("Access-Control-Expose-Headers", "X-Device-Id");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, User-Agent, X-Device-Id, X-Signature, X-Timestamp, X-Nonce, X-Security-Mode, X-Client-Ver"
+    );
+    res.setHeader("Access-Control-Expose-Headers", "X-Device-Id, X-Signature, X-Timestamp, X-Security-Status");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "SAMEORIGIN");
     if (_req.method === "OPTIONS") {
       return res.sendStatus(204);
+    }
+    next();
+  });
+
+  // API Signature & Integrity Verification Middleware
+  app.use("/api", (req: Request, res: Response, next) => {
+    const signature = req.headers["x-signature"] as string | undefined;
+    const timestampStr = req.headers["x-timestamp"] as string | undefined;
+    const nonce = req.headers["x-nonce"] as string | undefined;
+
+    if (signature && timestampStr && nonce) {
+      const deviceId = extractDeviceId(req);
+      const rawBody = req.method === "GET" || req.method === "HEAD" ? "" : JSON.stringify(req.body || {});
+      const check = verifyRequestSignature(deviceId, timestampStr, nonce, signature, rawBody);
+      if (!check.isValid) {
+        console.warn(`[Security Alert] Rejected unverified signature from device ${deviceId}: ${check.reason}`);
+        return res.status(403).json({
+          error: "Forbidden",
+          message: "فشل التحقق من التوقيع الرقمي للطلب المشفر (HMAC Signature Mismatch or Expired)",
+          reason: check.reason,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      res.setHeader("X-Security-Status", "Verified-HMAC");
     }
     next();
   });

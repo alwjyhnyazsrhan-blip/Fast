@@ -137,7 +137,40 @@ export function saveLocalSettings(settings: LocateGoSettings): void {
 }
 
 /**
- * عميل إرسال طلبات السيرفر مع حقن ترويسة X-Device-Id تلقائياً لضمان عزل البيانات
+ * توليد توقيع رقمي مشفر للطلب عبر Web Crypto API لمنع التلاعب
+ */
+async function computeClientSignature(deviceId: string, timestamp: number, nonce: string, bodyStr: string): Promise<string> {
+  try {
+    if (typeof window === 'undefined' || !window.crypto || !window.crypto.subtle) {
+      return '';
+    }
+    const keyChunks = new Uint8Array([
+      0x4c, 0x47, 0x5f, 0x53, 0x45, 0x43, 0x55, 0x52, 
+      0x45, 0x5f, 0x32, 0x30, 0x32, 0x36, 0x5f, 0x48, 
+      0x41, 0x53, 0x48, 0x5f, 0x56, 0x45, 0x52, 0x49, 
+      0x46, 0x59, 0x5f, 0x4c, 0x47, 0x5f, 0x39, 0x39
+    ]).map((b, i) => b ^ (i % 7));
+
+    const cryptoKey = await window.crypto.subtle.importKey(
+      "raw",
+      keyChunks,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    const normalized = `${deviceId}:${timestamp}:${nonce}:${bodyStr}`;
+    const enc = new TextEncoder();
+    const signatureBuffer = await window.crypto.subtle.sign("HMAC", cryptoKey, enc.encode(normalized));
+    return Array.from(new Uint8Array(signatureBuffer))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * عميل إرسال طلبات السيرفر مع حقن ترويسة X-Device-Id والتوقيع الأمني HMAC تلقائياً
  */
 export async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const deviceId = getDeviceId();
@@ -152,6 +185,7 @@ export async function apiFetch(url: string, options: RequestInit = {}): Promise<
 
   // إذا كان طلب POST/PUT وله body كائن، نتأكد من تضمين deviceId أيضاً
   let finalBody = options.body;
+  let bodyStrForSig = '';
   if (options.body && typeof options.body === 'string') {
     try {
       const parsed = JSON.parse(options.body);
@@ -159,9 +193,25 @@ export async function apiFetch(url: string, options: RequestInit = {}): Promise<
         parsed.deviceId = deviceId;
         finalBody = JSON.stringify(parsed);
       }
+      bodyStrForSig = finalBody as string;
     } catch {
-      // Body not JSON, keep as is
+      bodyStrForSig = options.body;
     }
+  }
+
+  // إضافة توقيع الحماية المشددة
+  const timestamp = Date.now();
+  const nonce = Math.random().toString(36).substring(2, 12);
+  try {
+    const sig = await computeClientSignature(deviceId, timestamp, nonce, bodyStrForSig);
+    if (sig) {
+      headers.set('X-Timestamp', timestamp.toString());
+      headers.set('X-Nonce', nonce);
+      headers.set('X-Signature', sig);
+      headers.set('X-Security-Mode', 'HMAC-SHA256');
+    }
+  } catch {
+    // Continue if crypto subtle fails in older environments
   }
 
   return fetch(url, {
