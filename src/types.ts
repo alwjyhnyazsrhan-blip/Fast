@@ -34,7 +34,8 @@ export interface OrderItem {
 }
 
 export interface LocateGoSettings {
-  maxDistanceKm: number;
+  maxDistanceKm: number; // الحد الأقصى لمسافة العميل / الوجهة (كم)
+  maxPickupDistanceKm: number; // الحد الأقصى لمسافة المطعم / الاستلام (كم)
   autoAccept: boolean;
   soundAlerts: boolean;
   minPayoutSar: number;

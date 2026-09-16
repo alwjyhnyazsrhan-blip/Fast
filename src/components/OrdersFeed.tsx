@@ -25,6 +25,8 @@ interface OrdersFeedProps {
   onClearOrders: () => void;
   onTestCustomOrder: (orderData: {
     distanceKm?: number;
+    pickupDistanceKm?: number;
+    deliveryDistanceKm?: number;
     appName: string;
     storeName: string;
     payoutSar: number;
@@ -48,6 +50,7 @@ export const OrdersFeed: React.FC<OrdersFeedProps> = ({
 
   // Form states
   const [customDistance, setCustomDistance] = useState<string>('1.8');
+  const [customPickupDistance, setCustomPickupDistance] = useState<string>('1.2');
   const [customApp, setCustomApp] = useState<string>('jahez');
   const [customStore, setCustomStore] = useState<string>('شاورما كلاسيك');
   const [customPayout, setCustomPayout] = useState<string>('20');
@@ -70,9 +73,12 @@ export const OrdersFeed: React.FC<OrdersFeedProps> = ({
 
     if (testMode === 'distance') {
       const dist = parseFloat(customDistance);
+      const pickupDist = parseFloat(customPickupDistance);
       if (!isNaN(dist) && dist > 0) {
         onTestCustomOrder({
           distanceKm: dist,
+          deliveryDistanceKm: dist,
+          pickupDistanceKm: !isNaN(pickupDist) ? pickupDist : undefined,
           appName: customApp,
           storeName: customStore,
           payoutSar: payout,
@@ -259,18 +265,34 @@ export const OrdersFeed: React.FC<OrdersFeedProps> = ({
             </div>
 
             {testMode === 'distance' ? (
-              <div>
-                <label className="text-slate-400 block mb-1">المسافة المقروءة (كم):</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0.2"
-                  max="30"
-                  value={customDistance}
-                  onChange={(e) => setCustomDistance(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 text-emerald-400 font-bold font-mono rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-cyan-500"
-                />
-              </div>
+              <>
+                <div>
+                  <label className="text-slate-400 block mb-1">مسافة العميل (كم):</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0.2"
+                    max="30"
+                    value={customDistance}
+                    onChange={(e) => setCustomDistance(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 text-emerald-400 font-bold font-mono rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-cyan-500"
+                    placeholder="مثلاً: 2.0"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-400 block mb-1">مسافة المطعم (كم):</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0.2"
+                    max="30"
+                    value={customPickupDistance}
+                    onChange={(e) => setCustomPickupDistance(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 text-cyan-400 font-bold font-mono rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-cyan-500"
+                    placeholder="مثلاً: 1.5"
+                  />
+                </div>
+              </>
             ) : null}
           </div>
 

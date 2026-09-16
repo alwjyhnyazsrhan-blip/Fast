@@ -24,6 +24,7 @@ interface FloatingWidgetOverlayProps {
   latestOrder: OrderItem | null;
   onTogglePower: () => void;
   onUpdateMaxDistance: (km: number) => void;
+  onUpdateMaxPickupDistance?: (km: number) => void;
 }
 
 export const FloatingWidgetOverlay: React.FC<FloatingWidgetOverlayProps> = ({
@@ -32,6 +33,7 @@ export const FloatingWidgetOverlay: React.FC<FloatingWidgetOverlayProps> = ({
   latestOrder,
   onTogglePower,
   onUpdateMaxDistance,
+  onUpdateMaxPickupDistance,
 }) => {
   const [isExpanded, setIsExpanded] = useState<boolean>(true);
   const [widgetPosition, setWidgetPosition] = useState<{ x: number; y: number }>({ x: 20, y: 70 });
@@ -247,10 +249,43 @@ export const FloatingWidgetOverlay: React.FC<FloatingWidgetOverlayProps> = ({
                       </span>
                     </div>
 
-                    {/* Max Distance Threshold Selector */}
-                    <div className="bg-slate-900/80 p-2 rounded-xl border border-slate-800">
+                    {/* Pickup Distance Threshold Selector */}
+                    <div className="bg-slate-900/80 p-2 rounded-xl border border-cyan-900/40">
                       <div className="flex items-center justify-between text-[11px] mb-1">
-                        <span className="text-slate-400">أقصى مسافة مقبولة:</span>
+                        <span className="text-cyan-300 font-medium">أقصى مسافة للمطعم:</span>
+                        <span className="text-xs font-mono font-black text-cyan-400">
+                          {settings.maxPickupDistanceKm || 2.0} كم
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => onUpdateMaxPickupDistance?.(Math.max(0.5, Math.round(((settings.maxPickupDistanceKm || 2.0) - 0.5) * 10) / 10))}
+                          className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center justify-center"
+                        >
+                          -
+                        </button>
+                        <input
+                          type="range"
+                          min="0.5"
+                          max="6.0"
+                          step="0.5"
+                          value={settings.maxPickupDistanceKm || 2.0}
+                          onChange={(e) => onUpdateMaxPickupDistance?.(parseFloat(e.target.value))}
+                          className="flex-1 h-1.5 bg-slate-800 rounded appearance-none cursor-pointer accent-cyan-500"
+                        />
+                        <button
+                          onClick={() => onUpdateMaxPickupDistance?.(Math.min(10, Math.round(((settings.maxPickupDistanceKm || 2.0) + 0.5) * 10) / 10))}
+                          className="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center justify-center"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Customer Distance Threshold Selector */}
+                    <div className="bg-slate-900/80 p-2 rounded-xl border border-emerald-900/40">
+                      <div className="flex items-center justify-between text-[11px] mb-1">
+                        <span className="text-emerald-300 font-medium">أقصى مسافة للعميل:</span>
                         <span className="text-xs font-mono font-black text-emerald-400">
                           {settings.maxDistanceKm} كم
                         </span>

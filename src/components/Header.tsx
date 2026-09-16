@@ -25,6 +25,7 @@ interface HeaderProps {
   isRefreshing?: boolean;
   vipCode?: string;
   onRelock?: () => void;
+  deviceId?: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -37,6 +38,7 @@ export const Header: React.FC<HeaderProps> = ({
   isRefreshing = false,
   vipCode,
   onRelock,
+  deviceId,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-[#0c1220]/90 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 sm:px-6">
@@ -164,6 +166,17 @@ export const Header: React.FC<HeaderProps> = ({
             <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isRefreshing ? 'animate-spin' : ''}`} />
             <span>مزامنة السيرفر</span>
           </button>
+
+          {/* Device ID Pill */}
+          {deviceId && (
+            <div 
+              title="معرف جهازك الخاص - بياناتك معزولة تماماً في السيرفر"
+              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/40 border border-emerald-500/30 text-emerald-300 text-xs font-mono font-bold"
+            >
+              <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{deviceId}</span>
+            </div>
+          )}
 
           {/* VIP Status Badge */}
           <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-semibold">

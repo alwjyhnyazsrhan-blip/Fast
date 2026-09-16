@@ -4,6 +4,7 @@
  */
 
 export interface LocateGoNativeInterface {
+  getDeviceId?(): string;
   getSettingsJson(): string;
   saveSettings(settingsJsonStr: string): boolean;
   setTrackingActive(active: boolean): void;

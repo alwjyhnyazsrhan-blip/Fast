@@ -1,5 +1,6 @@
 import express, { Request, Response } from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 
 // Haversine formula for real-world geodesic distance calculation
@@ -24,6 +25,7 @@ function calculateHaversineDistanceKm(
 
 export interface RealOrder {
   id: string;
+  deviceId?: string;
   appName: string;
   storeName: string;
   customerDistrict: string;
@@ -42,25 +44,114 @@ export interface RealOrder {
   };
 }
 
-// In-Memory Real State (can be connected to SQLite, Postgres, or MongoDB in production)
-const state = {
-  isRunning: true,
+export interface DeviceData {
+  deviceId: string;
+  isRunning: boolean;
   settings: {
-    maxDistanceKm: 2.0,
-    autoAccept: true,
-    soundAlerts: true,
-    minPayoutSar: 15.0,
-    vibrationFeedback: true,
-  },
-  driverLocation: null as {
+    maxDistanceKm: number;
+    maxPickupDistanceKm: number;
+    autoAccept: boolean;
+    soundAlerts: boolean;
+    minPayoutSar: number;
+    vibrationFeedback: boolean;
+  };
+  driverLocation: {
     lat: number;
     lng: number;
     accuracy?: number;
     updatedAt: string;
-  } | null,
-  orders: [] as RealOrder[],
-  scanCount: 0,
-};
+  } | null;
+  orders: RealOrder[];
+  createdAt: string;
+  lastActiveAt: string;
+}
+
+// Multi-Tenant In-Memory & Persistent Storage per Device ID
+const DATA_DIR = path.join(process.cwd(), "data");
+const STORE_FILE = path.join(DATA_DIR, "locate_go_devices.json");
+const devices = new Map<string, DeviceData>();
+
+// Ensure data directory exists
+try {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+} catch (err) {
+  console.warn("[Storage] Could not create data directory:", err);
+}
+
+// Load devices from disk if available
+try {
+  if (fs.existsSync(STORE_FILE)) {
+    const raw = fs.readFileSync(STORE_FILE, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === "object" && parsed !== null) {
+      Object.keys(parsed).forEach((devId) => {
+        devices.set(devId, parsed[devId]);
+      });
+      console.log(`[Storage] Loaded ${devices.size} isolated device profiles from disk.`);
+    }
+  }
+} catch (err) {
+  console.warn("[Storage] Could not load persisted devices:", err);
+}
+
+let saveTimeout: NodeJS.Timeout | null = null;
+function scheduleSave() {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    try {
+      const obj: Record<string, DeviceData> = {};
+      devices.forEach((val, key) => {
+        obj[key] = val;
+      });
+      fs.writeFileSync(STORE_FILE, JSON.stringify(obj, null, 2), "utf-8");
+    } catch (err) {
+      console.warn("[Storage] Error persisting devices to disk:", err);
+    }
+  }, 1000);
+}
+
+// Extract Device ID cleanly from Header (X-Device-Id), Query, or Body
+function extractDeviceId(req: Request): string {
+  const headerVal = req.headers["x-device-id"];
+  const fromHeader = Array.isArray(headerVal) ? headerVal[0] : headerVal;
+  const fromQuery = typeof req.query.deviceId === "string" ? req.query.deviceId : undefined;
+  const fromBody = req.body && typeof req.body === "object" && typeof req.body.deviceId === "string" ? req.body.deviceId : undefined;
+
+  const raw = fromHeader || fromQuery || fromBody;
+  if (raw && raw.trim().length > 0) {
+    return raw.trim();
+  }
+  return "LG-DEFAULT-DEV";
+}
+
+// Get or initialize device data
+function getDeviceData(rawDeviceId: string): DeviceData {
+  const deviceId = rawDeviceId.trim();
+  if (!devices.has(deviceId)) {
+    devices.set(deviceId, {
+      deviceId,
+      isRunning: true,
+      settings: {
+        maxDistanceKm: 2.0,
+        maxPickupDistanceKm: 2.0,
+        autoAccept: true,
+        soundAlerts: true,
+        minPayoutSar: 15.0,
+        vibrationFeedback: true,
+      },
+      driverLocation: null,
+      orders: [],
+      createdAt: new Date().toISOString(),
+      lastActiveAt: new Date().toISOString(),
+    });
+    scheduleSave();
+  }
+  const data = devices.get(deviceId)!;
+  data.lastActiveAt = new Date().toISOString();
+  return data;
+}
 
 async function startServer() {
   const app = express();
@@ -72,7 +163,8 @@ async function startServer() {
   app.use((_req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, User-Agent");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, User-Agent, X-Device-Id");
+    res.setHeader("Access-Control-Expose-Headers", "X-Device-Id");
     if (_req.method === "OPTIONS") {
       return res.sendStatus(204);
     }
@@ -81,22 +173,27 @@ async function startServer() {
 
   // ==========================================
   // 1. HEALTH & PING DIAGNOSTICS FOR ANDROID APP
-  // Responds to GET & POST on both /api/health and /api/ping
+  // Responds to GET & POST on /api/health and /api/ping
   // ==========================================
-  const handleHealthAndPing = (_req: Request, res: Response) => {
+  const handleHealthAndPing = (req: Request, res: Response) => {
+    const deviceId = extractDeviceId(req);
+    const device = getDeviceData(deviceId);
+
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     return res.status(200).json({
       status: "online",
       success: true,
       ping: "pong",
-      service: "Locate Go Backend",
+      service: "Locate Go Multi-Tenant Backend",
       server: "locate",
-      message: "سيرفر Locate Go متصل وجاهز لاستقبال وفحص الطلبات",
+      message: "سيرفر Locate Go متصل وجاهز، ويطبق العزل الكامل لكل جهاز مندوب",
       timestamp: new Date().toISOString(),
       uptimeSeconds: Math.floor(process.uptime()),
-      isRunning: state.isRunning,
-      maxDistanceKm: state.settings.maxDistanceKm,
-      driverLocation: state.driverLocation,
+      deviceId: device.deviceId,
+      isRunning: device.isRunning,
+      maxDistanceKm: device.settings.maxDistanceKm,
+      maxPickupDistanceKm: device.settings.maxPickupDistanceKm,
+      totalDevicesRegistered: devices.size,
     });
   };
 
@@ -110,107 +207,161 @@ async function startServer() {
   app.post("/ping", handleHealthAndPing);
 
   // ==========================================
-  // 2. GET CURRENT SYSTEM STATUS & SETTINGS
+  // 2. GET DEVICE PROFILE INFO
   // ==========================================
-  app.get("/api/status", (_req: Request, res: Response) => {
-    const acceptedCount = state.orders.filter((o) => o.status === "accepted").length;
-    const rejectedCount = state.orders.filter((o) => o.status === "rejected").length;
+  app.get("/api/device/me", (req: Request, res: Response) => {
+    const deviceId = extractDeviceId(req);
+    const device = getDeviceData(deviceId);
+    res.json({
+      success: true,
+      deviceId: device.deviceId,
+      isRunning: device.isRunning,
+      settings: device.settings,
+      totalOrders: device.orders.length,
+      createdAt: device.createdAt,
+      lastActiveAt: device.lastActiveAt,
+      isolationGuaranteed: true,
+    });
+  });
+
+  // ==========================================
+  // 3. GET CURRENT SYSTEM STATUS & STATS (ISOLATED BY DEVICE ID)
+  // ==========================================
+  app.get("/api/status", (req: Request, res: Response) => {
+    const deviceId = extractDeviceId(req);
+    const device = getDeviceData(deviceId);
+
+    const acceptedCount = device.orders.filter((o) => o.status === "accepted").length;
+    const rejectedCount = device.orders.filter((o) => o.status === "rejected").length;
 
     res.json({
-      isRunning: state.isRunning,
-      settings: state.settings,
-      driverLocation: state.driverLocation,
+      deviceId: device.deviceId,
+      isRunning: device.isRunning,
+      settings: device.settings,
+      driverLocation: device.driverLocation,
       stats: {
-        totalScanned: state.orders.length,
+        totalScanned: device.orders.length,
         acceptedCount,
         rejectedCount,
         acceptanceRate:
-          state.orders.length > 0
-            ? Math.round((acceptedCount / state.orders.length) * 100)
+          device.orders.length > 0
+            ? Math.round((acceptedCount / device.orders.length) * 100)
             : 0,
       },
     });
   });
 
   // ==========================================
-  // 3. MASTER START/STOP TOGGLE
+  // 4. MASTER START/STOP TOGGLE (ISOLATED BY DEVICE ID)
   // ==========================================
   app.post("/api/status/toggle", (req: Request, res: Response) => {
+    const deviceId = extractDeviceId(req);
+    const device = getDeviceData(deviceId);
+
     if (typeof req.body.isRunning === "boolean") {
-      state.isRunning = req.body.isRunning;
+      device.isRunning = req.body.isRunning;
     } else {
-      state.isRunning = !state.isRunning;
+      device.isRunning = !device.isRunning;
     }
+    scheduleSave();
 
     res.json({
       success: true,
-      isRunning: state.isRunning,
-      message: state.isRunning ? "تم تشغيل الأداة والمراقبة بنجاح" : "تم إيقاف الأداة مؤقتاً",
+      deviceId: device.deviceId,
+      isRunning: device.isRunning,
+      message: device.isRunning ? "تم تشغيل الأداة والمراقبة بنجاح لهذا الجهاز" : "تم إيقاف الأداة مؤقتاً لهذا الجهاز",
     });
   });
 
   // ==========================================
-  // 4. UPDATE SETTINGS (Max Distance, etc.)
+  // 5. UPDATE SETTINGS (ISOLATED BY DEVICE ID)
   // ==========================================
   app.post("/api/settings", (req: Request, res: Response) => {
-    const { maxDistanceKm, autoAccept, soundAlerts, minPayoutSar, vibrationFeedback } = req.body;
+    const deviceId = extractDeviceId(req);
+    const device = getDeviceData(deviceId);
+
+    const { maxDistanceKm, maxPickupDistanceKm, autoAccept, soundAlerts, minPayoutSar, vibrationFeedback } = req.body;
 
     if (typeof maxDistanceKm === "number" && maxDistanceKm > 0) {
-      state.settings.maxDistanceKm = Math.round(maxDistanceKm * 10) / 10;
+      device.settings.maxDistanceKm = Math.round(maxDistanceKm * 10) / 10;
+    }
+    if (typeof maxPickupDistanceKm === "number" && maxPickupDistanceKm > 0) {
+      device.settings.maxPickupDistanceKm = Math.round(maxPickupDistanceKm * 10) / 10;
     }
     if (typeof autoAccept === "boolean") {
-      state.settings.autoAccept = autoAccept;
+      device.settings.autoAccept = autoAccept;
     }
     if (typeof soundAlerts === "boolean") {
-      state.settings.soundAlerts = soundAlerts;
+      device.settings.soundAlerts = soundAlerts;
     }
     if (typeof minPayoutSar === "number" && minPayoutSar >= 0) {
-      state.settings.minPayoutSar = minPayoutSar;
+      device.settings.minPayoutSar = minPayoutSar;
     }
     if (typeof vibrationFeedback === "boolean") {
-      state.settings.vibrationFeedback = vibrationFeedback;
+      device.settings.vibrationFeedback = vibrationFeedback;
     }
+    scheduleSave();
 
     res.json({
       success: true,
-      settings: state.settings,
-      message: "تم حفظ الإعدادات بنجاح في السيرفر",
+      deviceId: device.deviceId,
+      settings: device.settings,
+      message: "تم حفظ الإعدادات بنجاح للمندوب",
+    });
+  });
+
+  app.get("/api/settings", (req: Request, res: Response) => {
+    const deviceId = extractDeviceId(req);
+    const device = getDeviceData(deviceId);
+
+    res.json({
+      success: true,
+      deviceId: device.deviceId,
+      settings: device.settings,
     });
   });
 
   // ==========================================
-  // 5. UPDATE DRIVER'S REAL LIVE GPS LOCATION
+  // 6. UPDATE DRIVER'S REAL LIVE GPS LOCATION (ISOLATED BY DEVICE ID)
   // ==========================================
   app.post(["/api/location", "/api/driver/location"], (req: Request, res: Response) => {
+    const deviceId = extractDeviceId(req);
+    const device = getDeviceData(deviceId);
     const { lat, lng, accuracy } = req.body;
 
     if (typeof lat !== "number" || typeof lng !== "number") {
       return res.status(400).json({ error: "الإحداثيات غير صحيحة (lat and lng required)" });
     }
 
-    state.driverLocation = {
+    device.driverLocation = {
       lat,
       lng,
       accuracy: accuracy || undefined,
       updatedAt: new Date().toISOString(),
     };
+    scheduleSave();
 
     res.json({
       success: true,
-      driverLocation: state.driverLocation,
+      deviceId: device.deviceId,
+      driverLocation: device.driverLocation,
       message: "تم تحديث موقع المندوب الحقيقي بنجاح",
     });
   });
 
   // ==========================================
-  // 6. REAL GEOGRAPHIC & DISTANCE EVALUATION ENDPOINT
+  // 7. REAL GEOGRAPHIC & DISTANCE EVALUATION (ISOLATED BY DEVICE ID)
   // Webhook or App trigger sends the incoming order details here
   // ==========================================
-  app.post("/api/orders/evaluate", (req: Request, res: Response) => {
-    if (!state.isRunning) {
+  app.post(["/api/orders/evaluate", "/api/evaluate-order"], (req: Request, res: Response) => {
+    const deviceId = extractDeviceId(req);
+    const device = getDeviceData(deviceId);
+
+    if (!device.isRunning) {
       return res.status(403).json({
         decision: "ignored",
-        reason: "الأداة في وضع الإيقاف (Offline)",
+        deviceId: device.deviceId,
+        reason: "الأداة في وضع الإيقاف (Offline) لهذا الجهاز",
       });
     }
 
@@ -226,6 +377,9 @@ async function startServer() {
       distanceKm: inputDistance,
       pickupDistanceKm,
       deliveryDistanceKm,
+      // Optional override thresholds from device's local state
+      maxDistanceKm: overrideDeliveryLimit,
+      maxPickupDistanceKm: overridePickupLimit,
     } = req.body;
 
     let computedDistance = 0;
@@ -239,23 +393,19 @@ async function startServer() {
     ) {
       computedDistance = calculateHaversineDistanceKm(storeLat, storeLng, customerLat, customerLng);
     } else if (typeof deliveryDistanceKm === "number" && deliveryDistanceKm > 0) {
-      // Primary criteria: Delivery / Customer distance strictly compared against max distance
       computedDistance = Math.round(deliveryDistanceKm * 10) / 10;
     } else if (typeof inputDistance === "number" && inputDistance > 0) {
-      // Direct evaluated distance
       computedDistance = Math.round(inputDistance * 10) / 10;
     } else if (typeof pickupDistanceKm === "number" && pickupDistanceKm > 0) {
-      // Pickup distance fallback
       computedDistance = Math.round(pickupDistanceKm * 10) / 10;
     } else if (
-      state.driverLocation &&
+      device.driverLocation &&
       typeof storeLat === "number" &&
       typeof storeLng === "number"
     ) {
-      // Driver to store distance fallback
       computedDistance = calculateHaversineDistanceKm(
-        state.driverLocation.lat,
-        state.driverLocation.lng,
+        device.driverLocation.lat,
+        device.driverLocation.lng,
         storeLat,
         storeLng
       );
@@ -265,22 +415,39 @@ async function startServer() {
       });
     }
 
-    const maxAllowed = state.settings.maxDistanceKm;
-    const minPayout = state.settings.minPayoutSar;
+    // Determine effective limits (priority to explicit device settings)
+    const maxAllowedDelivery = typeof overrideDeliveryLimit === "number" && overrideDeliveryLimit > 0
+      ? overrideDeliveryLimit
+      : device.settings.maxDistanceKm;
 
-    const isDistanceAcceptable = computedDistance <= maxAllowed;
+    const maxAllowedPickup = typeof overridePickupLimit === "number" && overridePickupLimit > 0
+      ? overridePickupLimit
+      : device.settings.maxPickupDistanceKm;
+
+    const minPayout = device.settings.minPayoutSar;
+
+    const deliveryKm = typeof deliveryDistanceKm === "number" && deliveryDistanceKm > 0 ? deliveryDistanceKm : computedDistance;
+    const pickupKm = typeof pickupDistanceKm === "number" && pickupDistanceKm > 0 ? pickupDistanceKm : undefined;
+
+    const isDeliveryAcceptable = deliveryKm <= maxAllowedDelivery;
+    const isPickupAcceptable = pickupKm !== undefined ? pickupKm <= maxAllowedPickup : true;
     const isPayoutAcceptable = payoutSar >= minPayout;
-    const isAccepted = isDistanceAcceptable && isPayoutAcceptable;
+    const isAccepted = isDeliveryAcceptable && isPickupAcceptable && isPayoutAcceptable;
 
     let rejectionReason: string | undefined = undefined;
-    if (!isDistanceAcceptable) {
-      rejectionReason = `المسافة (${computedDistance} كم) تتجاوز الحد الأقصى المسموح (${maxAllowed} كم)`;
+    if (!isDeliveryAcceptable && !isPickupAcceptable) {
+      rejectionReason = `مسافة العميل (${deliveryKm} كم > ${maxAllowedDelivery} كم) ومسافة المطعم (${pickupKm} كم > ${maxAllowedPickup} كم) تتجاوزان الحد`;
+    } else if (!isDeliveryAcceptable) {
+      rejectionReason = `مسافة العميل (${deliveryKm} كم) تتجاوز الحد الأقصى المسموح (${maxAllowedDelivery} كم)`;
+    } else if (!isPickupAcceptable) {
+      rejectionReason = `مسافة المطعم (${pickupKm} كم) تتجاوز الحد الأقصى المسموح (${maxAllowedPickup} كم)`;
     } else if (!isPayoutAcceptable) {
       rejectionReason = `قيمة التوصيل (${payoutSar} ر.س) أقل من الحد الأدنى (${minPayout} ر.س)`;
     }
 
     const newOrder: RealOrder = {
       id: `ord-${Date.now().toString().slice(-4)}`,
+      deviceId: device.deviceId,
       appName,
       storeName,
       customerDistrict,
@@ -291,29 +458,34 @@ async function startServer() {
       detectedAt: new Date().toISOString(),
       status: isAccepted ? "accepted" : "rejected",
       rejectionReason,
-      autoAccepted: isAccepted && state.settings.autoAccept,
+      autoAccepted: isAccepted && device.settings.autoAccept,
       coordinates: {
         store: storeLat && storeLng ? { lat: storeLat, lng: storeLng } : undefined,
         customer: customerLat && customerLng ? { lat: customerLat, lng: customerLng } : undefined,
-        driver: state.driverLocation
-          ? { lat: state.driverLocation.lat, lng: state.driverLocation.lng }
+        driver: device.driverLocation
+          ? { lat: device.driverLocation.lat, lng: device.driverLocation.lng }
           : undefined,
       },
     };
 
-    // Keep up to 100 recent orders in history
-    state.orders.unshift(newOrder);
-    if (state.orders.length > 100) {
-      state.orders.pop();
+    // Store in THIS device's isolated order list ONLY!
+    device.orders.unshift(newOrder);
+    if (device.orders.length > 100) {
+      device.orders.pop();
     }
+    scheduleSave();
 
     res.status(201).json({
       success: true,
+      deviceId: device.deviceId,
       decision: isAccepted ? "accepted" : "rejected",
       order: newOrder,
       evaluation: {
         computedDistanceKm: computedDistance,
-        maxAllowedKm: maxAllowed,
+        deliveryDistanceKm: deliveryKm,
+        pickupDistanceKm: pickupKm,
+        maxAllowedDeliveryKm: maxAllowedDelivery,
+        maxAllowedPickupKm: maxAllowedPickup,
         isAccepted,
         rejectionReason,
       },
@@ -321,21 +493,34 @@ async function startServer() {
   });
 
   // ==========================================
-  // 7. GET ALL ORDERS HISTORY
+  // 8. GET ALL ORDERS HISTORY FOR THIS DEVICE ONLY
   // ==========================================
-  app.get("/api/orders", (_req: Request, res: Response) => {
+  app.get("/api/orders", (req: Request, res: Response) => {
+    const deviceId = extractDeviceId(req);
+    const device = getDeviceData(deviceId);
+
     res.json({
-      orders: state.orders,
-      count: state.orders.length,
+      deviceId: device.deviceId,
+      orders: device.orders,
+      count: device.orders.length,
     });
   });
 
   // ==========================================
-  // 8. CLEAR ORDERS HISTORY
+  // 9. CLEAR ORDERS HISTORY FOR THIS DEVICE ONLY
   // ==========================================
-  app.delete("/api/orders", (_req: Request, res: Response) => {
-    state.orders = [];
-    res.json({ success: true, message: "تم مسح سجل الطلبات بنجاح" });
+  app.delete("/api/orders", (req: Request, res: Response) => {
+    const deviceId = extractDeviceId(req);
+    const device = getDeviceData(deviceId);
+
+    device.orders = [];
+    scheduleSave();
+
+    res.json({
+      success: true,
+      deviceId: device.deviceId,
+      message: "تم مسح سجل الطلبات الخاص بهذا المندوب بنجاح",
+    });
   });
 
   // ==========================================
@@ -356,7 +541,7 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[Locate Go Server] Running on http://localhost:${PORT}`);
+    console.log(`[Locate Go Server] Running on http://localhost:${PORT} with Multi-Tenant Device Isolation`);
   });
 }
 

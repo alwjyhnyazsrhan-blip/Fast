@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Power, 
   Play, 
   Square, 
   MapPin, 
+  Store,
   Gauge, 
   CheckCircle, 
   SlidersHorizontal, 
@@ -22,42 +23,65 @@ interface MainControlCardProps {
   status: LocateGoStatus;
   onTogglePower: () => void;
   onUpdateMaxDistance: (km: number) => void;
+  onUpdateMaxPickupDistance: (km: number) => void;
   onUpdateSettings: (newSettings: Partial<LocateGoSettings>) => void;
   onGetLiveLocation?: () => void;
   isLocating?: boolean;
 }
 
-const DISTANCE_PRESETS = [1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
+const PICKUP_PRESETS = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0];
+const DELIVERY_PRESETS = [1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
 
 export const MainControlCard: React.FC<MainControlCardProps> = ({
   settings,
   status,
   onTogglePower,
   onUpdateMaxDistance,
+  onUpdateMaxPickupDistance,
   onUpdateSettings,
   onGetLiveLocation,
   isLocating,
 }) => {
-  const [inputValue, setInputValue] = useState(settings.maxDistanceKm.toString());
+  const [deliveryInput, setDeliveryInput] = useState(settings.maxDistanceKm.toString());
+  const [pickupInput, setPickupInput] = useState((settings.maxPickupDistanceKm || 2.0).toString());
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  useEffect(() => {
+    setDeliveryInput(settings.maxDistanceKm.toString());
+  }, [settings.maxDistanceKm]);
+
+  useEffect(() => {
+    setPickupInput((settings.maxPickupDistanceKm || 2.0).toString());
+  }, [settings.maxPickupDistanceKm]);
+
+  const handleDeliveryInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
-    setInputValue(val);
+    setDeliveryInput(val);
     const num = parseFloat(val);
     if (!isNaN(num) && num > 0 && num <= 50) {
       onUpdateMaxDistance(Math.round(num * 10) / 10);
     }
   };
 
-  const handlePresetClick = (km: number) => {
-    setInputValue(km.toString());
-    onUpdateMaxDistance(km);
+  const handlePickupInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setPickupInput(val);
+    const num = parseFloat(val);
+    if (!isNaN(num) && num > 0 && num <= 50) {
+      onUpdateMaxPickupDistance(Math.round(num * 10) / 10);
+    }
   };
 
-  const adjustDistance = (delta: number) => {
+  const adjustDeliveryDistance = (delta: number) => {
     const nextVal = Math.max(0.5, Math.min(25, Math.round((settings.maxDistanceKm + delta) * 10) / 10));
-    setInputValue(nextVal.toString());
+    setDeliveryInput(nextVal.toString());
     onUpdateMaxDistance(nextVal);
+  };
+
+  const adjustPickupDistance = (delta: number) => {
+    const current = settings.maxPickupDistanceKm || 2.0;
+    const nextVal = Math.max(0.5, Math.min(25, Math.round((current + delta) * 10) / 10));
+    setPickupInput(nextVal.toString());
+    onUpdateMaxPickupDistance(nextVal);
   };
 
   return (
@@ -91,7 +115,7 @@ export const MainControlCard: React.FC<MainControlCardProps> = ({
             </div>
           </div>
           <p className="text-xs text-slate-400 leading-relaxed mb-6">
-            يقوم السيرفر بالتحقق من مسافات استلام وتسليم الطلبات فوراً، وتمرير الأوامر للهاتف بالقبول أو الرفض التلقائي.
+            يقوم السيرفر ومحرك Accessibility بالتحقق الفوري من شرطي <strong className="text-cyan-300">مسافة المطعم</strong> و<strong className="text-emerald-300">مسافة العميل</strong> معاً، مع النقر الفوري Zero-Delay عند المطابقة.
           </p>
         </div>
 
@@ -178,109 +202,217 @@ export const MainControlCard: React.FC<MainControlCardProps> = ({
         </div>
       </div>
 
-      {/* 2. MAX DISTANCE FILTER CONTROL (Element #2) */}
+      {/* 2. DUAL DISTANCE CONTROLS (RESTAURANT & CUSTOMER) */}
       <div className="lg:col-span-7 bg-gradient-to-b from-[#121929] to-[#0c1220] rounded-2xl p-6 border border-slate-800 shadow-xl flex flex-col justify-between">
         <div>
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <span className="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-                <MapPin className="w-4 h-4" />
+                <SlidersHorizontal className="w-4 h-4" />
               </span>
-              <h2 className="text-base font-bold text-white">تحديد المسافة القصوى (فلتر الكيلومتر)</h2>
+              <h2 className="text-base font-bold text-white">فلترة المسافات المستقلة (المطعم + العميل)</h2>
             </div>
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-950/80 text-emerald-400 border border-emerald-500/30 font-mono">
-              حد الأمان: {settings.maxDistanceKm} كم
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-cyan-950/80 text-cyan-400 border border-cyan-500/30 font-mono">
+                المطعم: {settings.maxPickupDistanceKm || 2.0} كم
+              </span>
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-950/80 text-emerald-400 border border-emerald-500/30 font-mono">
+                العميل: {settings.maxDistanceKm} كم
+              </span>
+            </div>
           </div>
 
-          {/* Primary Distance Display & Controls */}
-          <div className="bg-[#090d16] p-4 sm:p-5 rounded-xl border border-slate-800/90 my-2">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="text-center sm:text-right">
-                <span className="text-xs text-slate-400 font-medium block">أقصى مسافة مسموح بها للطلب:</span>
-                <div className="flex items-baseline gap-2 mt-1">
-                  <span className="text-4xl sm:text-5xl font-black text-white tracking-tight font-mono">
+          <div className="space-y-4">
+            {/* PART A: RESTAURANT / PICKUP DISTANCE CONTROL */}
+            <div className="bg-[#090d16] p-4 rounded-xl border border-cyan-900/40 relative">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Store className="w-4 h-4 text-cyan-400" />
+                  <span className="text-xs font-bold text-cyan-300">1. أقصى مسافة للمطعم / الاستلام (Pickup Distance):</span>
+                </div>
+                <span className="text-[11px] text-cyan-400/90 font-mono bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-800/40">
+                  {settings.maxPickupDistanceKm || 2.0} كم كحد أقصى
+                </span>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-white font-mono">
+                    {settings.maxPickupDistanceKm || 2.0}
+                  </span>
+                  <span className="text-sm font-bold text-cyan-400">كم (مسافة المطعم)</span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    id="btn-decrease-pickup-distance"
+                    onClick={() => adjustPickupDistance(-0.5)}
+                    className="w-9 h-9 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-slate-200 font-bold text-base flex items-center justify-center cursor-pointer"
+                    title="إنقاص نصف كم"
+                  >
+                    -
+                  </button>
+
+                  <div className="relative">
+                    <input
+                      id="input-max-pickup-distance"
+                      type="number"
+                      step="0.1"
+                      min="0.5"
+                      max="25"
+                      value={pickupInput}
+                      onChange={handlePickupInputChange}
+                      className="w-20 h-9 text-center bg-slate-900 border border-slate-700 rounded-lg text-white font-mono font-bold text-sm focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+                    />
+                    <span className="absolute left-2 top-2.5 text-[9px] text-slate-500 font-mono pointer-events-none">
+                      كم
+                    </span>
+                  </div>
+
+                  <button
+                    id="btn-increase-pickup-distance"
+                    onClick={() => adjustPickupDistance(0.5)}
+                    className="w-9 h-9 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-slate-200 font-bold text-base flex items-center justify-center cursor-pointer"
+                    title="زيادة نصف كم"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+
+              {/* Slider for pickup */}
+              <div className="mt-3">
+                <input
+                  id="slider-max-pickup-distance"
+                  type="range"
+                  min="0.5"
+                  max="6"
+                  step="0.1"
+                  value={settings.maxPickupDistanceKm || 2.0}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    setPickupInput(val.toString());
+                    onUpdateMaxPickupDistance(val);
+                  }}
+                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                />
+              </div>
+
+              {/* Pickup presets */}
+              <div className="flex flex-wrap gap-1.5 mt-2.5">
+                {PICKUP_PRESETS.map((km) => {
+                  const isSelected = (settings.maxPickupDistanceKm || 2.0) === km;
+                  return (
+                    <button
+                      key={km}
+                      id={`btn-preset-pickup-${km}`}
+                      onClick={() => {
+                        setPickupInput(km.toString());
+                        onUpdateMaxPickupDistance(km);
+                      }}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold transition-all border ${
+                        isSelected
+                          ? 'bg-cyan-500 text-slate-950 border-cyan-400 font-bold shadow-sm shadow-cyan-500/30'
+                          : 'bg-slate-800/70 hover:bg-slate-700 text-slate-300 border-slate-700/60'
+                      }`}
+                    >
+                      {km} كم
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* PART B: CUSTOMER / DELIVERY DISTANCE CONTROL */}
+            <div className="bg-[#090d16] p-4 rounded-xl border border-emerald-900/40 relative">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-emerald-400" />
+                  <span className="text-xs font-bold text-emerald-300">2. أقصى مسافة للعميل / الوجهة (Delivery Distance):</span>
+                </div>
+                <span className="text-[11px] text-emerald-400/90 font-mono bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
+                  {settings.maxDistanceKm} كم كحد أقصى
+                </span>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-black text-white font-mono">
                     {settings.maxDistanceKm}
                   </span>
-                  <span className="text-lg font-bold text-emerald-400">كيلومتر (كم)</span>
+                  <span className="text-sm font-bold text-emerald-400">كم (مسافة العميل)</span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    id="btn-decrease-distance"
+                    onClick={() => adjustDeliveryDistance(-0.5)}
+                    className="w-9 h-9 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-slate-200 font-bold text-base flex items-center justify-center cursor-pointer"
+                    title="إنقاص نصف كم"
+                  >
+                    -
+                  </button>
+
+                  <div className="relative">
+                    <input
+                      id="input-max-distance"
+                      type="number"
+                      step="0.1"
+                      min="0.5"
+                      max="25"
+                      value={deliveryInput}
+                      onChange={handleDeliveryInputChange}
+                      className="w-20 h-9 text-center bg-slate-900 border border-slate-700 rounded-lg text-white font-mono font-bold text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                    />
+                    <span className="absolute left-2 top-2.5 text-[9px] text-slate-500 font-mono pointer-events-none">
+                      كم
+                    </span>
+                  </div>
+
+                  <button
+                    id="btn-increase-distance"
+                    onClick={() => adjustDeliveryDistance(0.5)}
+                    className="w-9 h-9 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-slate-200 font-bold text-base flex items-center justify-center cursor-pointer"
+                    title="زيادة نصف كم"
+                  >
+                    +
+                  </button>
                 </div>
               </div>
 
-              {/* Stepper buttons and input */}
-              <div className="flex items-center gap-2">
-                <button
-                  id="btn-decrease-distance"
-                  onClick={() => adjustDistance(-0.5)}
-                  className="w-11 h-11 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-slate-200 font-bold text-lg flex items-center justify-center transition-all cursor-pointer"
-                  title="إنقاص نصف كم"
-                >
-                  -
-                </button>
-
-                <div className="relative">
-                  <input
-                    id="input-max-distance"
-                    type="number"
-                    step="0.1"
-                    min="0.5"
-                    max="25"
-                    value={inputValue}
-                    onChange={handleInputChange}
-                    className="w-24 h-11 text-center bg-slate-900 border border-slate-700 rounded-xl text-white font-mono font-bold text-lg focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-                  />
-                  <span className="absolute left-2.5 top-3 text-[10px] text-slate-500 font-mono pointer-events-none">
-                    كم
-                  </span>
-                </div>
-
-                <button
-                  id="btn-increase-distance"
-                  onClick={() => adjustDistance(0.5)}
-                  className="w-11 h-11 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-slate-200 font-bold text-lg flex items-center justify-center transition-all cursor-pointer"
-                  title="زيادة نصف كم"
-                >
-                  +
-                </button>
+              {/* Slider for delivery */}
+              <div className="mt-3">
+                <input
+                  id="slider-max-distance"
+                  type="range"
+                  min="0.5"
+                  max="10"
+                  step="0.1"
+                  value={settings.maxDistanceKm}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    setDeliveryInput(val.toString());
+                    onUpdateMaxDistance(val);
+                  }}
+                  className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                />
               </div>
-            </div>
 
-            {/* Visual Slider */}
-            <div className="mt-5">
-              <div className="flex justify-between text-[11px] text-slate-400 font-mono mb-1.5">
-                <span>0.5 كم (قريب جداً)</span>
-                <span className="text-emerald-400 font-bold">{settings.maxDistanceKm} كم</span>
-                <span>10 كم (بعيد)</span>
-              </div>
-              <input
-                id="slider-max-distance"
-                type="range"
-                min="0.5"
-                max="10"
-                step="0.1"
-                value={settings.maxDistanceKm}
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value);
-                  setInputValue(val.toString());
-                  onUpdateMaxDistance(val);
-                }}
-                className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-              />
-            </div>
-
-            {/* Quick Preset Buttons */}
-            <div className="mt-4 pt-3 border-t border-slate-800/80">
-              <span className="text-[11px] text-slate-400 block mb-2 font-medium">خيارات مسافة سريعة للمناديب:</span>
-              <div className="flex flex-wrap gap-2">
-                {DISTANCE_PRESETS.map((km) => {
+              {/* Delivery presets */}
+              <div className="flex flex-wrap gap-1.5 mt-2.5">
+                {DELIVERY_PRESETS.map((km) => {
                   const isSelected = settings.maxDistanceKm === km;
                   return (
                     <button
                       key={km}
                       id={`btn-preset-${km}`}
-                      onClick={() => handlePresetClick(km)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-mono font-semibold transition-all border ${
+                      onClick={() => {
+                        setDeliveryInput(km.toString());
+                        onUpdateMaxDistance(km);
+                      }}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-mono font-semibold transition-all border ${
                         isSelected
-                          ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md shadow-emerald-500/20 font-bold'
+                          ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-bold shadow-sm shadow-emerald-500/30'
                           : 'bg-slate-800/70 hover:bg-slate-700 text-slate-300 border-slate-700/60'
                       }`}
                     >
@@ -297,14 +429,13 @@ export const MainControlCard: React.FC<MainControlCardProps> = ({
         <div className="mt-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 bg-slate-900/60 rounded-xl border border-slate-800/60 text-xs">
           <div className="flex items-center gap-2">
             <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span className="text-slate-300">
-              معيار القبول الفوري: <strong className="text-emerald-300">مسافة العميل / الوجهة</strong>{' '}
-              <strong className="text-white font-mono">≤ {settings.maxDistanceKm} كم</strong> (مسافة المطعم مفتوحة واختيارية).
+            <span className="text-slate-300 leading-relaxed">
+              شرط القبول التلقائي الصارم: <strong className="text-cyan-300">مسافة المطعم ≤ {settings.maxPickupDistanceKm || 2.0} كم</strong> <strong className="text-white">وَ</strong> <strong className="text-emerald-300">مسافة العميل ≤ {settings.maxDistanceKm} كم</strong> (كلاهما معاً).
             </span>
           </div>
 
           {/* Auto Accept Switch */}
-          <label className="flex items-center gap-2 cursor-pointer select-none">
+          <label className="flex items-center gap-2 cursor-pointer select-none shrink-0">
             <span className="text-slate-400 text-xs">قبول تلقائي:</span>
             <input
               id="checkbox-auto-accept"
@@ -320,3 +451,4 @@ export const MainControlCard: React.FC<MainControlCardProps> = ({
     </div>
   );
 };
+
