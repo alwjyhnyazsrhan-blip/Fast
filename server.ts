@@ -505,18 +505,16 @@ async function startServer() {
 
     const isDeliveryAcceptable = deliveryKm <= maxAllowedDelivery;
     const isPickupAcceptable = pickupKm !== undefined ? pickupKm <= maxAllowedPickup : true;
-    const isPayoutAcceptable = payoutSar >= minPayout;
-    const isAccepted = isDeliveryAcceptable && isPickupAcceptable && isPayoutAcceptable;
+    // تم إلغاء شرط الحد الأدنى للأرباح، والاعتماد حصرياً وبشكل مباشر على تحقق مسافة المطعم ومسافة العميل فقط
+    const isAccepted = isDeliveryAcceptable && isPickupAcceptable;
 
     let rejectionReason: string | undefined = undefined;
     if (!isDeliveryAcceptable && !isPickupAcceptable) {
-      rejectionReason = `مسافة العميل (${deliveryKm} كم > ${maxAllowedDelivery} كم) ومسافة المطعم (${pickupKm} كم > ${maxAllowedPickup} كم) تتجاوزان الحد`;
+      rejectionReason = `مسافة العميل (${deliveryKm} كم > ${maxAllowedDelivery} كم) ومسافة المطعم (${pickupKm} كم > ${maxAllowedPickup} كم) تتجاوزان الحد المسموح`;
     } else if (!isDeliveryAcceptable) {
       rejectionReason = `مسافة العميل (${deliveryKm} كم) تتجاوز الحد الأقصى المسموح (${maxAllowedDelivery} كم)`;
     } else if (!isPickupAcceptable) {
       rejectionReason = `مسافة المطعم (${pickupKm} كم) تتجاوز الحد الأقصى المسموح (${maxAllowedPickup} كم)`;
-    } else if (!isPayoutAcceptable) {
-      rejectionReason = `قيمة التوصيل (${payoutSar} ر.س) أقل من الحد الأدنى (${minPayout} ر.س)`;
     }
 
     const newOrder: RealOrder = {

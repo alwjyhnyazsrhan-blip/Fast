@@ -75,6 +75,185 @@ class LocateGoAccessibilityService : AccessibilityService() {
             "btn_accept", "accept", "accept_order", "btnAccept", "btn_confirm",
             "order_accept", "take_order", "button_accept", "action_accept", "btn_take", "slide_to_accept"
         )
+
+        /**
+         * تحويل وتوحيد الأرقام المشرقية والعربية والفارسية (٠-٩ و ۰-۹) إلى أرقام قياسية (0-9)
+         */
+        fun normalizeDigits(input: String): String {
+            val sb = java.lang.StringBuilder(input.length)
+            for (ch in input) {
+                when (ch) {
+                    '٠', '۰' -> sb.append('0')
+                    '١', '۱' -> sb.append('1')
+                    '٢', '۲' -> sb.append('2')
+                    '٣', '۳' -> sb.append('3')
+                    '٤', '۴' -> sb.append('4')
+                    '٥', '۵' -> sb.append('5')
+                    '٦', '۶' -> sb.append('6')
+                    '٧', '۷' -> sb.append('7')
+                    '٨', '۸' -> sb.append('8')
+                    '٩', '۹' -> sb.append('9')
+                    else -> sb.append(ch)
+                }
+            }
+            return sb.toString()
+        }
+
+        /**
+         * دالة استخراج وتحليل مسافة العميل بدقة متناهية (Parse Delivery Distance)
+         * - تنظيف النص تماماً من علامات الاتجاه والمحارف غير المرئية
+         * - توحيد الأرقام العربية والإنجليزية
+         * - معالجة الفواصل العشرية والنقاط بدقة تامة (مثل 1,5 أو 1.5 أو 1،5 أو 1٫5)
+         * - إزالة وتفسير وحدات القياس (كم، كيلو، ك.م، km، متر، م، meter، m)
+         * - تحويل الأمتار (متر / م) تلقائياً إلى كيلومتر (تقسيم على 1000.0) حتى لا تُرفض المسافات القريبة
+         * - إرجاع قيمة رقمية دقيقة (Double / Float) لضمان اتخاذ قرار القبول السليم
+         */
+        fun parseDeliveryDistance(rawText: String?): Double? {
+            if (rawText.isNullOrBlank()) return null
+
+            // تنظيف النص وتوحيد الأرقام
+            val cleaned = normalizeDigits(
+                rawText.replace(Regex("[\\u200B-\\u200F\\uFEFF\\u00A0\\u202A-\\u202E]"), " ").trim()
+            )
+
+            // 1. نمط الكيلومترات الخاص بمسافة العميل والتوصيل
+            val kmRegex = Regex(
+                """(?:مسافة\s*(?:العميل|التوصيل|الوجهة)|العميل\s*يبعد|مسافة\s*التوصيل|التوصيل|العميل|الوجهة|delivery|dropoff|customer)\s*[:]?\s*(\d+(?:[\.,،٫]\d+)?)\s*(?:كم|كيلو(?:متر)?|ك\.م|km|k\.m)""",
+                RegexOption.IGNORE_CASE
+            )
+            val kmMatch = kmRegex.find(cleaned)
+            if (kmMatch != null) {
+                val numStr = kmMatch.groupValues[1]
+                    .replace(',', '.')
+                    .replace('،', '.')
+                    .replace('٫', '.')
+                    .trim()
+                val parsed = numStr.toDoubleOrNull()
+                if (parsed != null && parsed > 0.0) {
+                    return Math.round(parsed * 100.0) / 100.0
+                }
+            }
+
+            // 2. نمط الأمتار الخاص بمسافة العميل والتوصيل (مثلاً: 500 متر أو 800 م أو 750m)
+            val meterRegex = Regex(
+                """(?:مسافة\s*(?:العميل|التوصيل|الوجهة)|العميل\s*يبعد|مسافة\s*التوصيل|التوصيل|العميل|الوجهة|delivery|dropoff|customer)\s*[:]?\s*(\d+(?:[\.,،٫]\d+)?)\s*(?:متر(?:اً|ا)?|meters?|\s*م(?!\p{L})|\s*m(?!\p{L}))""",
+                RegexOption.IGNORE_CASE
+            )
+            val meterMatch = meterRegex.find(cleaned)
+            if (meterMatch != null) {
+                val numStr = meterMatch.groupValues[1]
+                    .replace(',', '.')
+                    .replace('،', '.')
+                    .replace('٫', '.')
+                    .trim()
+                val meters = numStr.toDoubleOrNull()
+                if (meters != null && meters > 0.0) {
+                    // تحويل الأمتار إلى كيلومتر (500 متر = 0.5 كم)
+                    val km = meters / 1000.0
+                    return Math.round(km * 100.0) / 100.0
+                }
+            }
+
+            // 3. في حال كان النص مخصصاً في سياق العميل/التوصيل ولكنه يحتوي فقط على الرقم والوحدة
+            val isDeliveryContext = cleaned.contains("عميل", true) ||
+                    cleaned.contains("توصيل", true) ||
+                    cleaned.contains("وجهة", true) ||
+                    cleaned.contains("delivery", true) ||
+                    cleaned.contains("dropoff", true) ||
+                    cleaned.contains("customer", true)
+
+            if (isDeliveryContext) {
+                val generalKm = Regex("""(\d+(?:[\.,،٫]\d+)?)\s*(?:كم|كيلو(?:متر)?|ك\.م|km)""", RegexOption.IGNORE_CASE).find(cleaned)
+                if (generalKm != null) {
+                    val num = generalKm.groupValues[1].replace(',', '.').replace('،', '.').replace('٫', '.').trim().toDoubleOrNull()
+                    if (num != null && num > 0.0) return Math.round(num * 100.0) / 100.0
+                }
+
+                val generalMeter = Regex("""(\d+(?:[\.,،٫]\d+)?)\s*(?:متر(?:اً|ا)?|meters?|\s*م(?!\p{L})|\s*m(?!\p{L}))""", RegexOption.IGNORE_CASE).find(cleaned)
+                if (generalMeter != null) {
+                    val meters = generalMeter.groupValues[1].replace(',', '.').replace('،', '.').replace('٫', '.').trim().toDoubleOrNull()
+                    if (meters != null && meters > 0.0) {
+                        return Math.round((meters / 1000.0) * 100.0) / 100.0
+                    }
+                }
+            }
+
+            return null
+        }
+
+        /**
+         * دالة استخراج وتحليل مسافة المطعم / المتجر / الاستلام بدقة
+         */
+        fun parsePickupDistance(rawText: String?): Double? {
+            if (rawText.isNullOrBlank()) return null
+            val cleaned = normalizeDigits(
+                rawText.replace(Regex("[\\u200B-\\u200F\\uFEFF\\u00A0\\u202A-\\u202E]"), " ").trim()
+            )
+
+            val kmMatch = Regex(
+                """(?:مسافة\s*(?:المتجر|المطعم|الاستلام)|المتجر\s*يبعد|المطعم\s*يبعد|مسافة\s*الاستلام|الاستلام|المطعم|المتجر|pickup|store)\s*[:]?\s*(\d+(?:[\.,،٫]\d+)?)\s*(?:كم|كيلو(?:متر)?|ك\.م|km|k\.m)""",
+                RegexOption.IGNORE_CASE
+            ).find(cleaned)
+            if (kmMatch != null) {
+                val num = kmMatch.groupValues[1].replace(',', '.').replace('،', '.').replace('٫', '.').toDoubleOrNull()
+                if (num != null && num > 0.0) return Math.round(num * 100.0) / 100.0
+            }
+
+            val meterMatch = Regex(
+                """(?:مسافة\s*(?:المتجر|المطعم|الاستلام)|المتجر\s*يبعد|المطعم\s*يبعد|مسافة\s*الاستلام|الاستلام|المطعم|المتجر|pickup|store)\s*[:]?\s*(\d+(?:[\.,،٫]\d+)?)\s*(?:متر(?:اً|ا)?|meters?|\s*م(?!\p{L})|\s*m(?!\p{L}))""",
+                RegexOption.IGNORE_CASE
+            ).find(cleaned)
+            if (meterMatch != null) {
+                val meters = meterMatch.groupValues[1].replace(',', '.').replace('،', '.').replace('٫', '.').toDoubleOrNull()
+                if (meters != null && meters > 0.0) return Math.round((meters / 1000.0) * 100.0) / 100.0
+            }
+
+            val isPickupContext = cleaned.contains("مطعم", true) ||
+                    cleaned.contains("متجر", true) ||
+                    cleaned.contains("استلام", true) ||
+                    cleaned.contains("pickup", true) ||
+                    cleaned.contains("store", true)
+
+            if (isPickupContext) {
+                val genKm = Regex("""(\d+(?:[\.,،٫]\d+)?)\s*(?:كم|كيلو(?:متر)?|ك\.م|km)""", RegexOption.IGNORE_CASE).find(cleaned)
+                if (genKm != null) {
+                    val num = genKm.groupValues[1].replace(',', '.').replace('،', '.').replace('٫', '.').toDoubleOrNull()
+                    if (num != null && num > 0.0) return Math.round(num * 100.0) / 100.0
+                }
+            }
+
+            return null
+        }
+
+        /**
+         * استخراج المسافة العامة أو الإجمالية مع دعم وحدات الكيلومتر والأمتار
+         */
+        fun parseGeneralDistance(rawText: String?): Double? {
+            if (rawText.isNullOrBlank()) return null
+            val cleaned = normalizeDigits(
+                rawText.replace(Regex("[\\u200B-\\u200F\\uFEFF\\u00A0\\u202A-\\u202E]"), " ").trim()
+            )
+
+            val kmMatch = Regex(
+                """(?:المسافة\s*الإجمالية|إجمالي\s*المسافة|المسافة\s*الكلية|المسافة|يبعد|تبعد|distance|total)?\s*[:]?\s*(\d+(?:[\.,،٫]\d+)?)\s*(?:كم|كيلو(?:متر)?|ك\.م|km|k\.m)""",
+                RegexOption.IGNORE_CASE
+            ).find(cleaned)
+            if (kmMatch != null) {
+                val num = kmMatch.groupValues[1].replace(',', '.').replace('،', '.').replace('٫', '.').toDoubleOrNull()
+                if (num != null && num > 0.0) return Math.round(num * 100.0) / 100.0
+            }
+
+            val meterMatch = Regex(
+                """(?:المسافة\s*الإجمالية|إجمالي\s*المسافة|المسافة\s*الكلية|المسافة|يبعد|تبعد|distance|total)?\s*[:]?\s*(\d+(?:[\.,،٫]\d+)?)\s*(?:متر(?:اً|ا)?|meters?|\s*م(?!\p{L})|\s*m(?!\p{L}))""",
+                RegexOption.IGNORE_CASE
+            ).find(cleaned)
+            if (meterMatch != null) {
+                val meters = meterMatch.groupValues[1].replace(',', '.').replace('،', '.').replace('٫', '.').toDoubleOrNull()
+                if (meters != null && meters > 0.0) return Math.round((meters / 1000.0) * 100.0) / 100.0
+            }
+
+            return null
+        }
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -204,29 +383,49 @@ class LocateGoAccessibilityService : AccessibilityService() {
 
         val joinedContent = scanResult.texts.joinToString(" ")
 
-        // 1. استخراج مسافة العميل / الوجهة (Delivery Distance)
+        // 1. استخراج مسافة العميل / الوجهة (Delivery Distance) بدقة عالية وتنظيف شامل
         var deliveryDistKm = scanResult.directDeliveryKm
         if (deliveryDistKm == null) {
-            val deliveryMatcher = deliveryDistancePattern.matcher(joinedContent)
-            if (deliveryMatcher.find()) {
-                deliveryDistKm = deliveryMatcher.group(1)?.replace(',', '.')?.toDoubleOrNull()
+            deliveryDistKm = parseDeliveryDistance(joinedContent)
+        }
+        if (deliveryDistKm == null) {
+            for (t in scanResult.texts) {
+                val parsed = parseDeliveryDistance(t)
+                if (parsed != null && parsed > 0.0) {
+                    deliveryDistKm = parsed
+                    break
+                }
             }
         }
 
-        // 2. استخراج مسافة المطعم / الاستلام (Pickup Distance - اختيارية ومفتوحة)
+        // 2. استخراج مسافة المطعم / الاستلام (Pickup Distance) بدقة عالية
         var pickupDistKm = scanResult.directPickupKm
         if (pickupDistKm == null) {
-            val pickupMatcher = pickupDistancePattern.matcher(joinedContent)
-            if (pickupMatcher.find()) {
-                pickupDistKm = pickupMatcher.group(1)?.replace(',', '.')?.toDoubleOrNull()
+            pickupDistKm = parsePickupDistance(joinedContent)
+        }
+        if (pickupDistKm == null) {
+            for (t in scanResult.texts) {
+                val parsed = parsePickupDistance(t)
+                if (parsed != null && parsed > 0.0) {
+                    pickupDistKm = parsed
+                    break
+                }
             }
         }
 
         // 3. استخراج المسافة العامة كبديل إن لم تتوفر مسافة صريحة
         var generalDistKm: Double? = null
-        val genMatcher = generalDistancePattern.matcher(joinedContent)
-        if (genMatcher.find()) {
-            generalDistKm = genMatcher.group(1)?.replace(',', '.')?.toDoubleOrNull()
+        if (deliveryDistKm == null && pickupDistKm == null) {
+            generalDistKm = parseGeneralDistance(joinedContent)
+            if (generalDistKm == null) {
+                for (t in scanResult.texts) {
+                    val parsed = parseGeneralDistance(t)
+                    if (parsed != null && parsed > 0.0) {
+                        generalDistKm = parsed
+                        break
+                    }
+                }
+            }
         }
 
         if (deliveryDistKm == null && generalDistKm == null && pickupDistKm == null) {
@@ -240,7 +439,7 @@ class LocateGoAccessibilityService : AccessibilityService() {
         val targetEvaluationDistanceKm = deliveryDistKm ?: generalDistKm ?: pickupDistKm ?: return
         if (targetEvaluationDistanceKm <= 0.0) return
 
-        // 4. استخراج أجر التوصيل
+        // 4. استخراج أجر التوصيل للتوثيق والإحصاءات
         var payoutSar = scanResult.directPayoutSar ?: 18.0
         if (scanResult.directPayoutSar == null) {
             val payoutMatcher = payoutPattern.matcher(joinedContent)
@@ -266,21 +465,21 @@ class LocateGoAccessibilityService : AccessibilityService() {
 
         val maxAllowedDeliveryKm = cachedMaxAllowedKm
         val maxAllowedPickupKm = cachedMaxPickupDistanceKm
-        val minPayoutSar = cachedMinPayoutSar
 
         // =========================================================================
-        // قاعدة الفحص والقبول المزدوج الصارمة وفورية النقر (Zero-Delay):
-        // 1. مسافة العميل / الوجهة <= الحد الأقصى لمسافة العميل (مثلاً 2 كم).
-        // 2. مسافة المطعم / الاستلام <= الحد الأقصى لمسافة المطعم (مثلاً 1 كم أو 2 كم).
-        // 3. كلاهما معاً يجب أن يكونا ضمن الحدود المسموحة لقبول الطلب.
+        // قاعدة الفحص والقبول المباشر الحصرية (بدون أي شرط للحد الأدنى للأرباح):
+        // قبول الطلب يعتمد حصرياً ومباشرة وبشكل كامل على تحقق الشرطين التاليين معاً:
+        // 1. مسافة العميل / الوجهة <= الحد الأقصى لمسافة العميل (مثلاً 2.0 كم).
+        // 2. مسافة المطعم / الاستلام <= الحد الأقصى لمسافة المطعم (مثلاً 2.0 كم).
         // =========================================================================
         val actualDeliveryDist = deliveryDistKm ?: generalDistKm ?: targetEvaluationDistanceKm
         val actualPickupDist = pickupDistKm
 
         val isDeliveryWithinLimit = actualDeliveryDist <= maxAllowedDeliveryKm
         val isPickupWithinLimit = if (actualPickupDist != null) actualPickupDist <= maxAllowedPickupKm else (targetEvaluationDistanceKm <= maxAllowedPickupKm)
-        val isPayoutAccepted = payoutSar >= minPayoutSar
-        val isOrderMatching = isDeliveryWithinLimit && isPickupWithinLimit && isPayoutAccepted
+        
+        // الاعتماد الحصري على مسافة المطعم ومسافة العميل فقط دون أي شروط إضافية
+        val isOrderMatching = isDeliveryWithinLimit && isPickupWithinLimit
 
         val lowerPkg = packageName.lowercase()
         val resolvedAppName = when {
@@ -332,11 +531,10 @@ class LocateGoAccessibilityService : AccessibilityService() {
         } else {
             processedOrdersCache[deduplicationKey] = now
             val rejectReason = when {
-                !isDeliveryWithinLimit && !isPickupWithinLimit -> "مسافة العميل ($actualDeliveryDist كم > $maxAllowedDeliveryKm كم) ومسافة المطعم (${actualPickupDist ?: targetEvaluationDistanceKm} كم > $maxAllowedPickupKm كم) تتجاوزان الحد"
-                !isDeliveryWithinLimit -> "مسافة العميل ($actualDeliveryDist كم) تتجاوز الحد الأقصى ($maxAllowedDeliveryKm كم)"
-                !isPickupWithinLimit -> "مسافة المطعم (${actualPickupDist ?: targetEvaluationDistanceKm} كم) تتجاوز الحد الأقصى ($maxAllowedPickupKm كم)"
-                !isPayoutAccepted -> "الأجر ($payoutSar ر.س) أقل من $minPayoutSar ر.س"
-                else -> "معطل"
+                !isDeliveryWithinLimit && !isPickupWithinLimit -> "مسافة العميل ($actualDeliveryDist كم > $maxAllowedDeliveryKm كم) ومسافة المطعم (${actualPickupDist ?: targetEvaluationDistanceKm} كم > $maxAllowedPickupKm كم) تتجاوزان الحد المسموح"
+                !isDeliveryWithinLimit -> "مسافة العميل ($actualDeliveryDist كم) تتجاوز الحد الأقصى المسموح ($maxAllowedDeliveryKm كم)"
+                !isPickupWithinLimit -> "مسافة المطعم (${actualPickupDist ?: targetEvaluationDistanceKm} كم) تتجاوز الحد الأقصى المسموح ($maxAllowedPickupKm كم)"
+                else -> "المسافات غير متوافقة مع شروط المسافة المحددة"
             }
 
             Log.w("LocateGoService", "🚫 ORDER FILTERED: $rejectReason")
@@ -362,7 +560,7 @@ class LocateGoAccessibilityService : AccessibilityService() {
     /**
      * مسح شجرة العناصر في دورة أحادية فائقة الخفة:
      * - رصد واصطياد زر القبول فورياً إذا وجد.
-     * - استخراج نصوص المسافات والأسعار.
+     * - استخراج نصوص المسافات والأسعار بدقة فائقة باستخدام parseDeliveryDistance و parsePickupDistance.
      */
     private fun fastSinglePassTraversal(node: AccessibilityNodeInfo?, result: FastScanResult, displayHeight: Int) {
         if (node == null) return
@@ -406,18 +604,18 @@ class LocateGoAccessibilityService : AccessibilityService() {
             if (!isIgnored) {
                 result.texts.add(rawContent)
 
-                // فحص سريع لنصوص المسافات أثناء المرور لتسريع التحليل
-                if (result.directDeliveryKm == null && (lowerStr.contains("عميل") || lowerStr.contains("توصيل") || lowerStr.contains("وجهة") || lowerStr.contains("delivery") || lowerStr.contains("dropoff"))) {
-                    val m = deliveryDistancePattern.matcher(rawContent)
-                    if (m.find()) {
-                        result.directDeliveryKm = m.group(1)?.replace(',', '.')?.toDoubleOrNull()
+                // فحص سريع ودقيق لنصوص المسافات أثناء المرور لتسريع التحليل الفوري
+                if (result.directDeliveryKm == null) {
+                    val parsedDelivery = parseDeliveryDistance(rawContent)
+                    if (parsedDelivery != null && parsedDelivery > 0.0) {
+                        result.directDeliveryKm = parsedDelivery
                     }
                 }
 
-                if (result.directPickupKm == null && (lowerStr.contains("مطعم") || lowerStr.contains("متجر") || lowerStr.contains("استلام") || lowerStr.contains("pickup") || lowerStr.contains("store"))) {
-                    val m = pickupDistancePattern.matcher(rawContent)
-                    if (m.find()) {
-                        result.directPickupKm = m.group(1)?.replace(',', '.')?.toDoubleOrNull()
+                if (result.directPickupKm == null) {
+                    val parsedPickup = parsePickupDistance(rawContent)
+                    if (parsedPickup != null && parsedPickup > 0.0) {
+                        result.directPickupKm = parsedPickup
                     }
                 }
 
@@ -504,13 +702,10 @@ class LocateGoAccessibilityService : AccessibilityService() {
 
     private fun extractAllDistancesFromTexts(texts: List<String>): List<Double> {
         val result = mutableListOf<Double>()
-        val kmPattern = Pattern.compile("(\\d+(?:[.,]\\d+)?)\\s*(?:كم|كيلو|km|k\\.m)", Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE)
         for (item in texts) {
-            val m = kmPattern.matcher(item)
-            while (m.find()) {
-                m.group(1)?.replace(',', '.')?.toDoubleOrNull()?.let {
-                    if (it > 0.0) result.add(it)
-                }
+            val dist = parseGeneralDistance(item) ?: parseDeliveryDistance(item) ?: parsePickupDistance(item)
+            if (dist != null && dist > 0.0) {
+                result.add(dist)
             }
         }
         return result

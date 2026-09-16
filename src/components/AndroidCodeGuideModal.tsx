@@ -617,15 +617,14 @@ class LocateGoAccessibilityService : AccessibilityService() {
         )
 
         // =========================================================================
-        // قاعدة الفحص والقبول المزدوج الصارمة وفق متطلبات السائق:
-        // 1. مسافة المطعم / الاستلام <= الحد الأقصى لمسافة المطعم (مثلاً 1 كم أو 2 كم).
+        // قاعدة الفحص والقبول المباشر الحصرية (بدون أي شرط للحد الأدنى للأرباح):
+        // 1. مسافة المطعم / الاستلام <= الحد الأقصى لمسافة المطعم (مثلاً 2 كم).
         // 2. مسافة العميل / الوجهة <= الحد الأقصى لمسافة العميل (مثلاً 2 كم).
-        // 3. لن يتم قبول أي طلب إلا إذا كان الشرطان معاً متحققين.
+        // الاعتماد حصرياً وبشكل مباشر على تحقق مسافة المطعم ومسافة العميل فقط
         // =========================================================================
         val isDeliveryWithinLimit = actualDeliveryKm <= maxAllowedKm
         val isPickupWithinLimit = if (actualPickupKm != null) actualPickupKm <= maxPickupAllowedKm else (actualDeliveryKm <= maxPickupAllowedKm)
-        val isPayoutAccepted = payoutSar >= minPayoutSar
-        val isOrderMatching = isAutoAcceptEnabled && isDeliveryWithinLimit && isPickupWithinLimit && isPayoutAccepted
+        val isOrderMatching = isAutoAcceptEnabled && isDeliveryWithinLimit && isPickupWithinLimit
 
         val lowerPkg = packageName.lowercase()
         val resolvedAppName = when {
@@ -676,10 +675,9 @@ class LocateGoAccessibilityService : AccessibilityService() {
             // إذا لم تطابق مسافة العميل أو المطعم الحدود المسموحة
             processedOrdersCache[deduplicationKey] = now
             val rejectReason = when {
-                !isDeliveryWithinLimit && !isPickupWithinLimit -> "مسافة العميل (\$actualDeliveryKm كم > \$maxAllowedKm كم) ومسافة المطعم (\${actualPickupKm ?: targetEvaluationDistanceKm} كم > \$maxPickupAllowedKm كم) تتجاوزان الحد"
+                !isDeliveryWithinLimit && !isPickupWithinLimit -> "مسافة العميل (\$actualDeliveryKm كم > \$maxAllowedKm كم) ومسافة المطعم (\${actualPickupKm ?: targetEvaluationDistanceKm} كم > \$maxPickupAllowedKm كم) تتجاوزان الحد المسموح"
                 !isDeliveryWithinLimit -> "مسافة العميل (\$actualDeliveryKm كم) تتجاوز الحد الأقصى المحدد (\$maxAllowedKm كم)"
                 !isPickupWithinLimit -> "مسافة المطعم (\${actualPickupKm ?: targetEvaluationDistanceKm} كم) تتجاوز الحد الأقصى المحدد (\$maxPickupAllowedKm كم)"
-                !isPayoutAccepted -> "أجر التوصيل (\$payoutSar ر.س) أقل من الحد الأدنى (\$minPayoutSar ر.س)"
                 else -> "القبول التلقائي متوقف في الإعدادات"
             }
 

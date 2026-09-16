@@ -260,18 +260,16 @@ def evaluate_order(req: EvaluateOrderRequest, x_device_id: Optional[str] = Heade
 
     is_delivery_ok = delivery_km <= max_dist
     is_pickup_ok = (pickup_km <= max_pickup) if pickup_km is not None else True
-    is_payout_ok = req.payoutSar >= min_payout
-    is_accepted = is_delivery_ok and is_pickup_ok and is_payout_ok
+    # تم إزالة شرط الحد الأدنى للأرباح، والاعتماد حصرياً على تحقق مسافة المطعم ومسافة العميل فقط
+    is_accepted = is_delivery_ok and is_pickup_ok
 
     rejection_reason = None
     if not is_delivery_ok and not is_pickup_ok:
-        rejection_reason = f"مسافة العميل ({delivery_km} كم > {max_dist} كم) ومسافة المطعم ({pickup_km} كم > {max_pickup} كم) تتجاوزان الحد"
+        rejection_reason = f"مسافة العميل ({delivery_km} كم > {max_dist} كم) ومسافة المطعم ({pickup_km} كم > {max_pickup} كم) تتجاوزان الحد المسموح"
     elif not is_delivery_ok:
-        rejection_reason = f"مسافة العميل ({delivery_km} كم) تتجاوز الحد الأقصى ({max_dist} كم)"
+        rejection_reason = f"مسافة العميل ({delivery_km} كم) تتجاوز الحد الأقصى المسموح ({max_dist} كم)"
     elif not is_pickup_ok:
-        rejection_reason = f"مسافة المطعم ({pickup_km} كم) تتجاوز الحد الأقصى ({max_pickup} كم)"
-    elif not is_payout_ok:
-        rejection_reason = f"قيمة التوصيل ({req.payoutSar} ر.س) أقل من الحد الأدنى ({min_payout} ر.س)"
+        rejection_reason = f"مسافة المطعم ({pickup_km} كم) تتجاوز الحد الأقصى المسموح ({max_pickup} كم)"
 
     order_id = f"ord-{int(datetime.utcnow().timestamp() * 1000) % 10000}"
     order_record = {
