@@ -32,11 +32,10 @@ export const AndroidCodeGuideModal: React.FC = () => {
     | 'service'
     | 'activity'
     | 'client'
-    | 'security_proguard'
     | 'app_gradle'
     | 'root_gradle'
     | 'github_actions'
-  >('security_proguard');
+  >('tree');
   const [renderUrl, setRenderUrl] = useState<string>('https://your-locate-go.onrender.com');
   const [refreshIntervalMs, setRefreshIntervalMs] = useState<number>(1500);
 
@@ -54,18 +53,17 @@ export const AndroidCodeGuideModal: React.FC = () => {
   const PROJECT_TREE_TEXT = `locate-go/
 ├── android/                                     # مجلد أندرويد الأصلي المتكامل (Native Project)
 │   ├── app/
-│   │   ├── build.gradle                        # إعدادات تطبيق أندرويد (minifyEnabled true + R8 Full Mode + Shrinking)
-│   │   ├── proguard-rules.pro                  # قواعد تشويش الكود المتقدم وحذف Logcat وسجلات التتبع
+│   │   ├── build.gradle                        # إعدادات تطبيق أندرويد (JDK 17 + SDK 34 + Play Services Location)
+│   │   ├── proguard-rules.pro                  # قواعد حماية الكود
 │   │   └── src/main/
-│   │       ├── AndroidManifest.xml             # الصلاحيات وتأمين الشبكة (network_security_config + allowBackup=false)
+│   │       ├── AndroidManifest.xml             # جميع الصلاحيات (ACCESS_FINE_LOCATION, Foreground Services, Accessibility)
 │   │       ├── java/com/locatego/driver/
-│   │       │   ├── MainActivity.kt             # واجهة التطبيق الموحدة الحاضنة للوحة التحكم
-│   │       │   ├── LocateGoNativeBridge.kt     # جسر التواصل البرمجي المحمي (@JavascriptInterface)
+│   │       │   ├── MainActivity.kt             # واجهة التطبيق الموحدة الحاضنة للوحة التحكم (Single App Architecture)
+│   │       │   ├── LocateGoNativeBridge.kt     # جسر التواصل البرمجي التفاعلي (@JavascriptInterface) بين React والأندرويد
 │   │       │   ├── LocationTrackingService.kt  # خدمة التتبع الجغرافي المستمر (Foreground Service) بنطاق 2.0 كم
-│   │       │   ├── LocateGoAccessibilityService.kt # خدمة قراءة الشاشة والاعتراض الفوري وقبول الطلب
+│   │       │   ├── LocateGoAccessibilityService.kt # خدمة قراءة الشاشة والاعتراض الفوري وقبول الطلب (بدون سحب)
 │   │       │   ├── FloatingOverlayService.kt   # النافذة العائمة فوق شاشات تطبيقات التوصيل
-│   │       │   ├── RenderApiClient.kt          # عميل الشبكة فائق السرعة مع التوقيع الرقمي HMAC و TLS 1.3
-│   │       │   ├── SecurityHardener.kt         # وحدة التشفير وتوليد توقيع HMAC وكشف الرووت والمصححات
+│   │       │   ├── RenderApiClient.kt          # عميل الشبكة فائق السرعة المتصل بسيرفر Render
 │   │       │   └── BootReceiver.kt             # التشغيل التلقائي عند إقلاع الهاتف
 │   │       └── res/
 │   │           ├── values/
@@ -73,21 +71,20 @@ export const AndroidCodeGuideModal: React.FC = () => {
 │   │           │   ├── colors.xml
 │   │           │   └── themes.xml
 │   │           └── xml/
-│   │               ├── accessibility_service_config.xml # إعدادات إيماءات النقر
-│   │               └── network_security_config.xml      # فرض تشفير HTTPS الصارم ومنع Cleartext
+│   │               └── accessibility_service_config.xml # إعدادات إيماءات النقر والسحب
 │   ├── gradle/wrapper/
 │   │   └── gradle-wrapper.properties           # إصدار Gradle 8.5 المتوافق مع JDK 17
 │   ├── build.gradle                            # ملف البناء الرئيسي (Android Gradle Plugin 8.2.2)
 │   ├── settings.gradle                         # إعدادات المشروع
-│   ├── gradle.properties                       # ضبط ذاكرة JVM وتفعيل android.enableR8.fullMode=true
+│   ├── gradle.properties                       # ضبط ذاكرة JVM والمكتبات
 │   ├── gradlew                                 # سكربت البناء في لينكس/ماك
 │   └── gradlew.bat                             # سكربت البناء في ويندوز
 │
 ├── .github/workflows/
-│   └── build-apk.yml                           # سير عمل GitHub Actions لإنتاج ملف APK حقيقي مشوش ومحمي
+│   └── build-apk.yml                           # سير عمل GitHub Actions لإنتاج ملف APK حقيقي في السحابة
 │
-├── server.ts                                   # خادم Node.js / Express مع التحقق من توقيع HMAC المشفر
-├── server_python.py                            # خادم FastAPI مع دعم التوقيع الأمني ومكافحة هجمات التكرار
+├── server.ts                                   # خادم Node.js / Express فائق السرعة
+├── server_python.py                            # خادم FastAPI البديل
 └── src/                                        # لوحة تحكم الويب المباشرة
 `;
 
@@ -604,27 +601,22 @@ class LocateGoAccessibilityService : AccessibilityService() {
         // قراءة إعدادات السائق المحددة محلياً من SharedPreferences
         val prefs = getSharedPreferences("locate_go_prefs", Context.MODE_PRIVATE)
         val maxAllowedKm = prefs.getFloat("max_distance_km", 2.0f).toDouble()
-        val maxPickupAllowedKm = prefs.getFloat("max_pickup_distance_km", 2.0f).toDouble()
         val minPayoutSar = prefs.getFloat("min_payout_sar", 0.0f).toDouble()
         val isAutoAcceptEnabled = prefs.getBoolean("auto_accept", true)
 
-        val actualDeliveryKm = deliveryDistKm ?: generalDistKm ?: targetEvaluationDistanceKm
-        val actualPickupKm = pickupDistKm
-
         Log.i(
             "LocateGoService",
-            "🎯 NEW OFFER: Store='\$storeName' | Restaurant=\${actualPickupKm ?: \"N/A\"} km (Max: \$maxPickupAllowedKm km) | Customer=\$actualDeliveryKm km (Max: \$maxAllowedKm km) | Payout=\$payoutSar SAR"
+            "🎯 NEW OFFER DETECTED: Store='\$storeName' | DeliveryDist=\${deliveryDistKm ?: \"N/A\"} km (Strict Max: \$maxAllowedKm km) | PickupDist=\${pickupDistKm ?: \"N/A\"} km (Open/Optional) | EvalDist=\$targetEvaluationDistanceKm km | Payout=\$payoutSar SAR"
         )
 
         // =========================================================================
-        // قاعدة الفحص والقبول المباشر الحصرية (بدون أي شرط للحد الأدنى للأرباح):
-        // 1. مسافة المطعم / الاستلام <= الحد الأقصى لمسافة المطعم (مثلاً 2 كم).
-        // 2. مسافة العميل / الوجهة <= الحد الأقصى لمسافة العميل (مثلاً 2 كم).
-        // الاعتماد حصرياً وبشكل مباشر على تحقق مسافة المطعم ومسافة العميل فقط
+        // قاعدة الفحص والقبول الصارمة وفق متطلبات السائق:
+        // 1. مسافة العميل / الوجهة <= الحد الأقصى للمسافة (مثلاً 2 كم).
+        // 2. مسافة المطعم مفتوحة واختيارية تماماً ولا تعطل القبول أبداً.
         // =========================================================================
-        val isDeliveryWithinLimit = actualDeliveryKm <= maxAllowedKm
-        val isPickupWithinLimit = if (actualPickupKm != null) actualPickupKm <= maxPickupAllowedKm else (actualDeliveryKm <= maxPickupAllowedKm)
-        val isOrderMatching = isAutoAcceptEnabled && isDeliveryWithinLimit && isPickupWithinLimit
+        val isDeliveryWithinLimit = targetEvaluationDistanceKm <= maxAllowedKm
+        val isPayoutAccepted = payoutSar >= minPayoutSar
+        val isOrderMatching = isAutoAcceptEnabled && isDeliveryWithinLimit && isPayoutAccepted
 
         val lowerPkg = packageName.lowercase()
         val resolvedAppName = when {
@@ -648,7 +640,7 @@ class LocateGoAccessibilityService : AccessibilityService() {
             val clickSuccess = executeInstantDirectAccept(root)
             Log.i(
                 "LocateGoService",
-                "⚡⚡ ZERO-DELAY ACCEPT TRIGGERED! Click success = \$clickSuccess for order at \$storeName (Restaurant: \${actualPickupKm ?: \"N/A\"} km <= \$maxPickupAllowedKm km • Customer: \$actualDeliveryKm km <= \$maxAllowedKm km)"
+                "⚡⚡ ZERO-DELAY ACCEPT TRIGGERED! Click success = \$clickSuccess for order at \$storeName (Customer dist: \${deliveryDistKm ?: targetEvaluationDistanceKm} km <= \$maxAllowedKm km, Restaurant dist: \${pickupDistKm ?: \"N/A\"} km - Open)"
             )
 
             // تنبيه صوتي واهتزاز فوري للمندوب بنجاح القبول
@@ -672,12 +664,11 @@ class LocateGoAccessibilityService : AccessibilityService() {
                 isEvaluatingOrder.set(false)
             }
         } else {
-            // إذا لم تطابق مسافة العميل أو المطعم الحدود المسموحة
+            // إذا لم تطابق مسافة العميل الحد الأقصى
             processedOrdersCache[deduplicationKey] = now
             val rejectReason = when {
-                !isDeliveryWithinLimit && !isPickupWithinLimit -> "مسافة العميل (\$actualDeliveryKm كم > \$maxAllowedKm كم) ومسافة المطعم (\${actualPickupKm ?: targetEvaluationDistanceKm} كم > \$maxPickupAllowedKm كم) تتجاوزان الحد المسموح"
-                !isDeliveryWithinLimit -> "مسافة العميل (\$actualDeliveryKm كم) تتجاوز الحد الأقصى المحدد (\$maxAllowedKm كم)"
-                !isPickupWithinLimit -> "مسافة المطعم (\${actualPickupKm ?: targetEvaluationDistanceKm} كم) تتجاوز الحد الأقصى المحدد (\$maxPickupAllowedKm كم)"
+                !isDeliveryWithinLimit -> "مسافة العميل/الوجهة (\${deliveryDistKm ?: targetEvaluationDistanceKm} كم) تتجاوز الحد الأقصى المحدد (\$maxAllowedKm كم)"
+                !isPayoutAccepted -> "أجر التوصيل (\$payoutSar ر.س) أقل من الحد الأدنى (\$minPayoutSar ر.س)"
                 else -> "القبول التلقائي متوقف في الإعدادات"
             }
 
@@ -1582,74 +1573,6 @@ class RenderApiClient(private val context: Context) {
 }
 `;
 
-  // ----------------------------------------------------
-  // 8. proguard-rules.pro & SecurityHardener
-  // ----------------------------------------------------
-  const SECURITY_PROGUARD_CODE = `# ==============================================================================
-# Locate Go - Extreme Code Obfuscation & Hardening Rules (ProGuard / R8)
-# ملف: android/app/proguard-rules.pro
-# ==============================================================================
-
-# 1. تشويش الكود وتسطيح وضغط الدوال وإعادة الحزم إلى مسار مجهول
--optimizationpasses 5
--repackageclasses 'com.locatego.driver.o'
--flattenpackagehierarchy 'com.locatego.driver.o'
--allowaccessmodification
--overloadaggressively
--useuniqueclassmembernames
--mergeinterfacesaggressively
-
-# 2. إزالة أسماء الملفات الأصلية (.kt/.java) وأرقام الأسطر لمنع تتبع الأخطاء أو الهندسة العكسية
--renamesourcefileattribute ""
--keepattributes Exceptions,InnerClasses,Signature,Deprecated,JavascriptInterface
-
-# 3. حذف جميع سجلات Logcat من ملف الـ APK النهائي لمنع المتلصصين من تتبع البيانات
--assumenosideeffects class android.util.Log {
-    public static boolean isLoggable(java.lang.String, int);
-    public static int v(...);
-    public static int d(...);
-    public static int i(...);
-    public static int w(...);
-    public static int e(...);
-    public static int println(...);
-}
-
-# 4. الحفاظ على المكونات الأساسية وجسر الويب من التشويش
--keep public class com.locatego.driver.MainActivity { *; }
--keep public class com.locatego.driver.LocateGoAccessibilityService { *; }
--keep public class com.locatego.driver.FloatingOverlayService { *; }
--keep public class com.locatego.driver.LocationTrackingService { *; }
--keep public class com.locatego.driver.BootReceiver { *; }
-
-# حماية دوال @JavascriptInterface للتواصل بدون انقطاع مع React
--keepattributes JavascriptInterface
--keepclassmembers class * {
-    @android.webkit.JavascriptInterface <methods>;
-}
--keep class com.locatego.driver.LocateGoNativeBridge { <methods>; }
-
-# 5. حماية OkHttp و Gson وموديلات الشبكة
--dontwarn okhttp3.**
--keep class okhttp3.** { *; }
--keep class com.locatego.driver.RenderApiClient$** { *; }
--keep class com.locatego.driver.SecurityHardener { *; }
-
-// ==============================================================================
-// SecurityHardener.kt - التوقيع الرقمي المشفر HMAC-SHA256 وكشف الرووت
-// ملف: android/app/src/main/java/com/locatego/driver/SecurityHardener.kt
-// ==============================================================================
-// 1. تشفير وتجزئة المفاتيح والنصوص الحساسة بذاكرة البايت (Dynamic XOR) لمنع قراءتها عبر strings
-// 2. توقيع الطلبات الرقمي HMAC-SHA256 (Anti-Tampering & Anti-Replay):
-//    - X-Device-Id: معرف الجهاز المعزول
-//    - X-Timestamp: وقت الطلب (يُرفض أي طلب بفارق زمني > 5 دقائق)
-//    - X-Nonce: معرّف عشوائي فريد لكل طلب لمنع هجمات إعادة الإرسال
-//    - X-Signature: HMAC-SHA256(deviceId:timestamp:nonce:bodyJson)
-// 3. كشف بيئة الرووت والمصححات:
-//    - فحص Debug.isDebuggerConnected()
-//    - فحص مسارات Superuser و su الثنائية
-//    - فحص build tags (test-keys)
-`;
-
   const activeCode =
     activeTab === 'tree'
       ? PROJECT_TREE_TEXT
@@ -1663,8 +1586,6 @@ class RenderApiClient(private val context: Context) {
       ? MAIN_ACTIVITY_CODE
       : activeTab === 'client'
       ? RENDER_CLIENT_CODE
-      : activeTab === 'security_proguard'
-      ? SECURITY_PROGUARD_CODE
       : activeTab === 'app_gradle'
       ? APP_GRADLE_CODE
       : activeTab === 'root_gradle'
@@ -1800,16 +1721,6 @@ class RenderApiClient(private val context: Context) {
         </button>
 
         <button
-          onClick={() => setActiveTab('security_proguard')}
-          className={`px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
-            activeTab === 'security_proguard' ? 'bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 shadow-sm' : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-          <span>تشويش الكود (ProGuard / R8 & HMAC)</span>
-        </button>
-
-        <button
           onClick={() => setActiveTab('app_gradle')}
           className={`px-3 py-1.5 rounded-lg font-medium transition-all cursor-pointer ${
             activeTab === 'app_gradle' ? 'bg-rose-500/20 text-rose-300 font-bold border border-rose-500/30 shadow-sm' : 'text-slate-400 hover:text-slate-200'
@@ -1854,8 +1765,6 @@ class RenderApiClient(private val context: Context) {
                 ? 'android/app/src/main/java/com/locatego/driver/LocateGoAccessibilityService.kt'
                 : activeTab === 'activity'
                 ? 'android/app/src/main/java/com/locatego/driver/MainActivity.kt'
-                : activeTab === 'security_proguard'
-                ? 'android/app/proguard-rules.pro & SecurityHardener.kt (تشويش الكود وتشفير API)'
                 : activeTab === 'app_gradle'
                 ? 'android/app/build.gradle'
                 : activeTab === 'root_gradle'

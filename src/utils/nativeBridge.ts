@@ -4,7 +4,6 @@
  */
 
 export interface LocateGoNativeInterface {
-  getDeviceId?(): string;
   getSettingsJson(): string;
   saveSettings(settingsJsonStr: string): boolean;
   setTrackingActive(active: boolean): void;
@@ -13,6 +12,9 @@ export interface LocateGoNativeInterface {
   toggleFloatingOverlay(): void;
   requestBatteryOptimization(): void;
   showToast(message: string): void;
+  getDeviceId?(): string;
+  setDeviceId?(newId: string): boolean;
+  getSecurityStatusJson?(): string;
 }
 
 declare global {

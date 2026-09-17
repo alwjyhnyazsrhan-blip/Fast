@@ -25,8 +25,6 @@ interface OrdersFeedProps {
   onClearOrders: () => void;
   onTestCustomOrder: (orderData: {
     distanceKm?: number;
-    pickupDistanceKm?: number;
-    deliveryDistanceKm?: number;
     appName: string;
     storeName: string;
     payoutSar: number;
@@ -35,6 +33,7 @@ interface OrdersFeedProps {
     customerLat?: number;
     customerLng?: number;
   }) => void;
+  currentDeviceId?: string;
 }
 
 export const OrdersFeed: React.FC<OrdersFeedProps> = ({
@@ -43,6 +42,7 @@ export const OrdersFeed: React.FC<OrdersFeedProps> = ({
   isRunning,
   onClearOrders,
   onTestCustomOrder,
+  currentDeviceId,
 }) => {
   const [filter, setFilter] = useState<'all' | 'accepted' | 'rejected'>('all');
   const [testMode, setTestMode] = useState<'distance' | 'coordinates'>('distance');
@@ -50,7 +50,6 @@ export const OrdersFeed: React.FC<OrdersFeedProps> = ({
 
   // Form states
   const [customDistance, setCustomDistance] = useState<string>('1.8');
-  const [customPickupDistance, setCustomPickupDistance] = useState<string>('1.2');
   const [customApp, setCustomApp] = useState<string>('jahez');
   const [customStore, setCustomStore] = useState<string>('شاورما كلاسيك');
   const [customPayout, setCustomPayout] = useState<string>('20');
@@ -73,12 +72,9 @@ export const OrdersFeed: React.FC<OrdersFeedProps> = ({
 
     if (testMode === 'distance') {
       const dist = parseFloat(customDistance);
-      const pickupDist = parseFloat(customPickupDistance);
       if (!isNaN(dist) && dist > 0) {
         onTestCustomOrder({
           distanceKm: dist,
-          deliveryDistanceKm: dist,
-          pickupDistanceKm: !isNaN(pickupDist) ? pickupDist : undefined,
           appName: customApp,
           storeName: customStore,
           payoutSar: payout,
@@ -108,7 +104,7 @@ export const OrdersFeed: React.FC<OrdersFeedProps> = ({
       {/* Header with Title and Filters */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-800">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="p-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-400">
               <ListOrdered className="w-4 h-4" />
             </span>
@@ -116,6 +112,11 @@ export const OrdersFeed: React.FC<OrdersFeedProps> = ({
             <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
               {orders.length} طلب
             </span>
+            {currentDeviceId && (
+              <span className="text-[11px] px-2 py-0.5 rounded-md bg-cyan-950/70 text-cyan-300 border border-cyan-500/30 font-mono font-bold" title="سجل الطلبات معزول لجهاز هذا المندوب فقط">
+                المندوب: {currentDeviceId}
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-400 mt-1">
             سجل حقيقي للطلبات التي تم استلامها والتحقق من مسافتها الجغرافية عبر خوارزمية السيرفر
@@ -265,34 +266,18 @@ export const OrdersFeed: React.FC<OrdersFeedProps> = ({
             </div>
 
             {testMode === 'distance' ? (
-              <>
-                <div>
-                  <label className="text-slate-400 block mb-1">مسافة العميل (كم):</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0.2"
-                    max="30"
-                    value={customDistance}
-                    onChange={(e) => setCustomDistance(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 text-emerald-400 font-bold font-mono rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-cyan-500"
-                    placeholder="مثلاً: 2.0"
-                  />
-                </div>
-                <div>
-                  <label className="text-slate-400 block mb-1">مسافة المطعم (كم):</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0.2"
-                    max="30"
-                    value={customPickupDistance}
-                    onChange={(e) => setCustomPickupDistance(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 text-cyan-400 font-bold font-mono rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-cyan-500"
-                    placeholder="مثلاً: 1.5"
-                  />
-                </div>
-              </>
+              <div>
+                <label className="text-slate-400 block mb-1">المسافة المقروءة (كم):</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.2"
+                  max="30"
+                  value={customDistance}
+                  onChange={(e) => setCustomDistance(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 text-emerald-400 font-bold font-mono rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
             ) : null}
           </div>
 
@@ -398,13 +383,18 @@ export const OrdersFeed: React.FC<OrdersFeedProps> = ({
                     </div>
 
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className={`text-xs font-bold ${appConf.color}`}>
                           {appConf.name}
                         </span>
                         <span className="text-[10px] text-slate-500 font-mono">
                           {order.id}
                         </span>
+                        {order.deviceId && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-cyan-400 font-mono" title="معرف جهاز المندوب">
+                            {order.deviceId}
+                          </span>
+                        )}
                         <span className="text-[10px] text-slate-500 flex items-center gap-1 font-mono">
                           <Clock className="w-3 h-3" />
                           {timeString}

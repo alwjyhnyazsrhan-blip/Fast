@@ -8,24 +8,24 @@ import { AndroidCodeGuideModal } from './components/AndroidCodeGuideModal';
 import { ServerDeployGuide } from './components/ServerDeployGuide';
 import { AndroidNativeControls } from './components/AndroidNativeControls';
 import { VipLockScreen } from './components/VipLockScreen';
-import { DeviceSessionCard } from './components/DeviceSessionCard';
-import { LocateGoSettings, LocateGoStatus, OrderItem } from './types';
-import { resolveAppSource } from './utils/sampleData';
+import { RepresentativeDeviceManager } from './components/RepresentativeDeviceManager';
+import { SecurityShieldBadge } from './components/SecurityShieldBadge';
+import { LocateGoSettings, LocateGoStatus, OrderItem, AppSource } from './types';
+import { INITIAL_ORDERS, APP_CONFIG, resolveAppSource } from './utils/sampleData';
 import { soundManager } from './utils/audio';
-import { getNativeBridge } from './utils/nativeBridge';
-import {
-  getDeviceId,
-  setDeviceId,
-  regenerateDeviceId,
-  loadLocalSettings,
-  saveLocalSettings,
-  apiFetch,
-} from './utils/deviceManager';
+import { getNativeBridge, isRunningInAndroidApp } from './utils/nativeBridge';
+import { getActiveDeviceId, setActiveDeviceId } from './utils/device';
+import { getSecureApiHeaders } from './utils/security';
 
 export default function App() {
-  // 1. Device ID & Local Settings (Completely Isolated per Courier Device)
-  const [deviceId, setDeviceIdState] = useState<string>(getDeviceId);
-  const [settings, setSettings] = useState<LocateGoSettings>(loadLocalSettings);
+  const [deviceId, setDeviceIdState] = useState<string>(getActiveDeviceId());
+  const [settings, setSettings] = useState<LocateGoSettings>({
+    maxDistanceKm: 2.0,
+    autoAccept: true,
+    soundAlerts: true,
+    minPayoutSar: 15.0,
+    vibrationFeedback: true,
+  });
 
   const [orders, setOrders] = useState<OrderItem[]>([]);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'server' | 'floating' | 'code'>('dashboard');
@@ -57,18 +57,30 @@ export default function App() {
   }, []);
 
   const [status, setStatus] = useState<LocateGoStatus>({
+    deviceId: getActiveDeviceId(),
     isRunning: true,
     isOverlayActive: true,
     isMonitoringScreen: true,
     fps: 5.2,
     latencyMs: 14,
     lastScanTimestamp: Date.now(),
-    totalScanned: 0,
-    acceptedCount: 0,
-    rejectedCount: 0,
+    totalScanned: orders.length,
+    acceptedCount: orders.filter((o) => o.status === 'accepted').length,
+    rejectedCount: orders.filter((o) => o.status === 'rejected').length,
     serverConnected: false,
     driverLocation: null,
   });
+
+  // Listen for device changed events
+  useEffect(() => {
+    const handleDeviceChangeEvent = (e: any) => {
+      if (e.detail?.deviceId) {
+        setDeviceIdState(e.detail.deviceId);
+      }
+    };
+    window.addEventListener('locate_device_changed', handleDeviceChangeEvent);
+    return () => window.removeEventListener('locate_device_changed', handleDeviceChangeEvent);
+  }, []);
 
   // ----------------------------------------------------
   // 0. Single App Architecture: Listen for Android Bridge Sync
@@ -78,30 +90,25 @@ export default function App() {
     const bridge = getNativeBridge();
     if (bridge) {
       try {
-        if (typeof bridge.getDeviceId === 'function') {
+        if (bridge.getDeviceId) {
           const nativeDevId = bridge.getDeviceId();
-          if (nativeDevId && nativeDevId.trim()) {
-            const clean = setDeviceId(nativeDevId.trim());
-            setDeviceIdState(clean);
+          if (nativeDevId && nativeDevId !== deviceId) {
+            setDeviceIdState(nativeDevId);
+            setActiveDeviceId(nativeDevId);
           }
         }
 
         const rawSettings = bridge.getSettingsJson();
         if (rawSettings) {
           const parsed = JSON.parse(rawSettings);
-          setSettings((prev) => {
-            const merged = {
-              ...prev,
-              maxDistanceKm: parsed.maxDistanceKm ?? prev.maxDistanceKm,
-              maxPickupDistanceKm: parsed.maxPickupDistanceKm ?? prev.maxPickupDistanceKm,
-              autoAccept: parsed.autoAccept ?? prev.autoAccept,
-              soundAlerts: parsed.soundAlerts ?? prev.soundAlerts,
-              minPayoutSar: parsed.minPayoutSar ?? prev.minPayoutSar,
-              vibrationFeedback: parsed.vibrationFeedback ?? prev.vibrationFeedback,
-            };
-            saveLocalSettings(merged);
-            return merged;
-          });
+          setSettings((prev) => ({
+            ...prev,
+            maxDistanceKm: parsed.maxDistanceKm ?? prev.maxDistanceKm,
+            autoAccept: parsed.autoAccept ?? prev.autoAccept,
+            soundAlerts: parsed.soundAlerts ?? prev.soundAlerts,
+            minPayoutSar: parsed.minPayoutSar ?? prev.minPayoutSar,
+            vibrationFeedback: parsed.vibrationFeedback ?? prev.vibrationFeedback,
+          }));
         }
 
         const rawStatus = bridge.getAndroidStatusJson();
@@ -140,39 +147,50 @@ export default function App() {
     return () => {
       window.onLocateGoNativeSync = undefined;
     };
-  }, []);
+  }, [deviceId]);
 
   // ----------------------------------------------------
-  // 1. Initial Sync with Real Server API (Isolated by Device ID)
+  // 1. Initial Sync with Real Server API (Isolated per Device)
   // ----------------------------------------------------
-  const fetchServerStatus = useCallback(async () => {
+  const fetchServerStatus = useCallback(async (targetDeviceId = deviceId) => {
     try {
-      const res = await apiFetch('/api/status');
+      const res = await fetch(`/api/status?deviceId=${encodeURIComponent(targetDeviceId)}`, {
+        headers: { 'X-Device-Id': targetDeviceId },
+      });
       if (res.ok) {
         const data = await res.json();
         setStatus((prev) => ({
           ...prev,
-          isRunning: data.isRunning ?? prev.isRunning,
+          deviceId: data.deviceId || targetDeviceId,
+          isRunning: data.isRunning,
           serverConnected: true,
-          driverLocation: data.driverLocation ?? prev.driverLocation,
+          driverLocation: data.driverLocation,
           totalScanned: data.stats?.totalScanned ?? prev.totalScanned,
           acceptedCount: data.stats?.acceptedCount ?? prev.acceptedCount,
           rejectedCount: data.stats?.rejectedCount ?? prev.rejectedCount,
+          acceptanceRate: data.stats?.acceptanceRate,
+          totalEarningsSar: data.stats?.totalEarningsSar,
         }));
+        if (data.settings) {
+          setSettings(data.settings);
+        }
       }
     } catch {
       setStatus((prev) => ({ ...prev, serverConnected: false }));
     }
-  }, []);
+  }, [deviceId]);
 
-  const fetchServerOrders = useCallback(async () => {
+  const fetchServerOrders = useCallback(async (targetDeviceId = deviceId) => {
     try {
-      const res = await apiFetch('/api/orders');
+      const res = await fetch(`/api/orders?deviceId=${encodeURIComponent(targetDeviceId)}`, {
+        headers: { 'X-Device-Id': targetDeviceId },
+      });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.orders)) {
           const mappedOrders: OrderItem[] = data.orders.map((o: any) => ({
             id: o.id,
+            deviceId: o.deviceId || targetDeviceId,
             appSource: resolveAppSource(o.appName),
             appName: o.appName || 'Locate Go',
             storeName: o.storeName || 'متجر',
@@ -192,21 +210,20 @@ export default function App() {
     } catch {
       // Offline fallback
     }
-  }, []);
+  }, [deviceId]);
 
-  // Sync with server when deviceId changes
   useEffect(() => {
-    fetchServerStatus();
-    fetchServerOrders();
-  }, [deviceId, fetchServerStatus, fetchServerOrders]);
+    fetchServerStatus(deviceId);
+    fetchServerOrders(deviceId);
+  }, [fetchServerStatus, fetchServerOrders, deviceId]);
 
-  // Sync settings with server on load or change
-  useEffect(() => {
-    apiFetch('/api/settings', {
-      method: 'POST',
-      body: JSON.stringify(settings),
-    }).catch(() => {});
-  }, [deviceId, settings]);
+  const handleDeviceChanged = (newDeviceId: string) => {
+    setDeviceIdState(newDeviceId);
+    setStatus((prev) => ({ ...prev, deviceId: newDeviceId }));
+    setOrders([]);
+    fetchServerStatus(newDeviceId);
+    fetchServerOrders(newDeviceId);
+  };
 
   // ----------------------------------------------------
   // 2. Real GPS Location via HTML5 Geolocation API
@@ -231,11 +248,14 @@ export default function App() {
 
         setStatus((prev) => ({ ...prev, driverLocation: driverLoc }));
 
-        // Post to real server (tagged with X-Device-Id)
+        // Post to real server with cryptographically signed integrity headers
         try {
-          await apiFetch('/api/location', {
+          const bodyStr = JSON.stringify({ lat: latitude, lng: longitude, accuracy, deviceId });
+          const secureHeaders = await getSecureApiHeaders(deviceId, bodyStr);
+          await fetch('/api/location', {
             method: 'POST',
-            body: JSON.stringify({ lat: latitude, lng: longitude, accuracy }),
+            headers: secureHeaders,
+            body: bodyStr,
           });
         } catch {
           // Ignored if offline
@@ -246,7 +266,7 @@ export default function App() {
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
-  }, []);
+  }, [deviceId]);
 
   // Sync counts whenever orders change
   useEffect(() => {
@@ -286,14 +306,18 @@ export default function App() {
     }
 
     try {
-      await apiFetch('/api/status/toggle', {
+      await fetch('/api/status/toggle', {
         method: 'POST',
-        body: JSON.stringify({ isRunning: nextRunning }),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Device-Id': deviceId,
+        },
+        body: JSON.stringify({ isRunning: nextRunning, deviceId }),
       });
     } catch {
       // Local state already updated
     }
-  }, [status.isRunning, soundEnabled]);
+  }, [status.isRunning, soundEnabled, deviceId]);
 
   // Keyboard shortcut: Spacebar toggles start/stop
   useEffect(() => {
@@ -311,12 +335,11 @@ export default function App() {
   }, [handleTogglePower]);
 
   // ----------------------------------------------------
-  // 4. Update Settings (localStorage + Server Partition + SharedPreferences)
+  // 4. Update Settings (Synced with Server & Android SharedPreferences)
   // ----------------------------------------------------
   const handleUpdateMaxDistance = async (km: number) => {
     setSettings((prev) => {
       const updated = { ...prev, maxDistanceKm: km };
-      saveLocalSettings(updated); // 💾 Save immediately in driver's localStorage
       const bridge = getNativeBridge();
       if (bridge) {
         bridge.saveSettings(JSON.stringify(updated));
@@ -325,40 +348,22 @@ export default function App() {
     });
 
     try {
-      await apiFetch('/api/settings', {
+      await fetch('/api/settings', {
         method: 'POST',
-        body: JSON.stringify({ maxDistanceKm: km }),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Device-Id': deviceId,
+        },
+        body: JSON.stringify({ maxDistanceKm: km, deviceId }),
       });
     } catch {
-      // Local is safe
-    }
-  };
-
-  const handleUpdateMaxPickupDistance = async (km: number) => {
-    setSettings((prev) => {
-      const updated = { ...prev, maxPickupDistanceKm: km };
-      saveLocalSettings(updated); // 💾 Save immediately in driver's localStorage
-      const bridge = getNativeBridge();
-      if (bridge) {
-        bridge.saveSettings(JSON.stringify(updated));
-      }
-      return updated;
-    });
-
-    try {
-      await apiFetch('/api/settings', {
-        method: 'POST',
-        body: JSON.stringify({ maxPickupDistanceKm: km }),
-      });
-    } catch {
-      // Local is safe
+      // Keep local
     }
   };
 
   const handleUpdateSettings = async (newSettings: Partial<LocateGoSettings>) => {
     setSettings((prev) => {
       const updated = { ...prev, ...newSettings };
-      saveLocalSettings(updated); // 💾 Save immediately in driver's localStorage
       const bridge = getNativeBridge();
       if (bridge) {
         bridge.saveSettings(JSON.stringify(updated));
@@ -367,17 +372,21 @@ export default function App() {
     });
 
     try {
-      await apiFetch('/api/settings', {
+      await fetch('/api/settings', {
         method: 'POST',
-        body: JSON.stringify(newSettings),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Device-Id': deviceId,
+        },
+        body: JSON.stringify({ ...newSettings, deviceId }),
       });
     } catch {
-      // Local is safe
+      // Keep local
     }
   };
 
   // ----------------------------------------------------
-  // 5. Submit Order to Real Server for Geodesic Evaluation (Isolated per Device)
+  // 5. Submit Order to Real Server for Geodesic Evaluation
   // ----------------------------------------------------
   const handleProcessOrder = useCallback(
     async (orderPayload: {
@@ -385,8 +394,6 @@ export default function App() {
       storeName: string;
       customerDistrict?: string;
       distanceKm?: number;
-      pickupDistanceKm?: number;
-      deliveryDistanceKm?: number;
       payoutSar: number;
       storeLat?: number;
       storeLng?: number;
@@ -395,16 +402,13 @@ export default function App() {
     }) => {
       if (!status.isRunning) return;
 
-      const payloadWithLimits = {
-        ...orderPayload,
-        maxDistanceKm: settings.maxDistanceKm,
-        maxPickupDistanceKm: settings.maxPickupDistanceKm,
-      };
-
       try {
-        const res = await apiFetch('/api/orders/evaluate', {
+        const bodyStr = JSON.stringify({ ...orderPayload, deviceId });
+        const secureHeaders = await getSecureApiHeaders(deviceId, bodyStr);
+        const res = await fetch('/api/orders/evaluate', {
           method: 'POST',
-          body: JSON.stringify(payloadWithLimits),
+          headers: secureHeaders,
+          body: bodyStr,
         });
 
         if (res.ok) {
@@ -412,6 +416,7 @@ export default function App() {
           const serverOrder = data.order;
           const mappedOrder: OrderItem = {
             id: serverOrder.id,
+            deviceId: serverOrder.deviceId || deviceId,
             appSource: resolveAppSource(serverOrder.appName || orderPayload.appName),
             appName: serverOrder.appName,
             storeName: serverOrder.storeName,
@@ -441,38 +446,23 @@ export default function App() {
         // Fallback local processing if server is temporarily unreachable
       }
 
-      // Fallback local computation if server is temporarily unreachable
-      const deliveryDist = orderPayload.deliveryDistanceKm ?? orderPayload.distanceKm ?? 1.8;
-      const pickupDist = orderPayload.pickupDistanceKm ?? 1.2;
-      const isDeliveryAccepted = deliveryDist <= settings.maxDistanceKm;
-      const isPickupAccepted = pickupDist <= (settings.maxPickupDistanceKm ?? 2.0);
-      const isPayoutAccepted = orderPayload.payoutSar >= settings.minPayoutSar;
-      const isAccepted = isDeliveryAccepted && isPickupAccepted && isPayoutAccepted;
-
-      let fallbackReason: string | undefined = undefined;
-      if (!isDeliveryAccepted && !isPickupAccepted) {
-        fallbackReason = `مسافة العميل (${deliveryDist} كم) ومسافة المطعم (${pickupDist} كم) تتجاوزان الحدود المسموحة`;
-      } else if (!isDeliveryAccepted) {
-        fallbackReason = `مسافة العميل (${deliveryDist} كم) تتجاوز الحد الأقصى (${settings.maxDistanceKm} كم)`;
-      } else if (!isPickupAccepted) {
-        fallbackReason = `مسافة المطعم (${pickupDist} كم) تتجاوز الحد الأقصى (${settings.maxPickupDistanceKm ?? 2.0} كم)`;
-      } else if (!isPayoutAccepted) {
-        fallbackReason = `أجر التوصيل (${orderPayload.payoutSar} ر.س) أقل من الحد الأدنى (${settings.minPayoutSar} ر.س)`;
-      }
-
+      // Fallback local Haversine computation
+      const distance = orderPayload.distanceKm || 1.8;
+      const isAccepted = distance <= settings.maxDistanceKm;
       const fallbackOrder: OrderItem = {
         id: `ord-${Math.floor(1000 + Math.random() * 9000)}`,
+        deviceId: deviceId,
         appSource: resolveAppSource(orderPayload.appName),
         appName: orderPayload.appName,
         storeName: orderPayload.storeName,
         customerDistrict: orderPayload.customerDistrict || 'حي الياسمين',
-        distanceKm: deliveryDist,
-        pickupDistanceKm: pickupDist,
-        deliveryDistanceKm: deliveryDist,
+        distanceKm: distance,
         payoutSar: orderPayload.payoutSar,
         detectedAt: new Date(),
         status: isAccepted ? 'accepted' : 'rejected',
-        rejectionReason: fallbackReason,
+        rejectionReason: isAccepted
+          ? undefined
+          : `المسافة (${distance} كم) تتجاوز الحد الأقصى (${settings.maxDistanceKm} كم)`,
         autoAccepted: isAccepted,
       };
 
@@ -485,14 +475,17 @@ export default function App() {
         }
       }
     },
-    [status.isRunning, settings.maxDistanceKm, settings.maxPickupDistanceKm, settings.minPayoutSar, soundEnabled]
+    [status.isRunning, settings.maxDistanceKm, soundEnabled, deviceId]
   );
 
-  // Clear orders from server for THIS device
+  // Clear orders from server for this device
   const handleClearOrders = async () => {
     setOrders([]);
     try {
-      await apiFetch('/api/orders', { method: 'DELETE' });
+      await fetch(`/api/orders?deviceId=${encodeURIComponent(deviceId)}`, {
+        method: 'DELETE',
+        headers: { 'X-Device-Id': deviceId },
+      });
     } catch {
       // Local cleared
     }
@@ -501,35 +494,10 @@ export default function App() {
   // Real server synchronization
   const handleRefreshServerOrders = useCallback(async () => {
     setIsRefreshing(true);
-    await fetchServerStatus();
-    await fetchServerOrders();
+    await fetchServerStatus(deviceId);
+    await fetchServerOrders(deviceId);
     setIsRefreshing(false);
-  }, [fetchServerStatus, fetchServerOrders]);
-
-  // Device ID Management (Regenerate clean session or switch profile)
-  const handleRegenerateDeviceId = useCallback(() => {
-    if (window.confirm('هل تريد بالتأكيد توليد معرف جهاز جديد وبدء جلسة نظيفة ومعزولة تماماً؟')) {
-      const newId = regenerateDeviceId();
-      setDeviceIdState(newId);
-      setOrders([]);
-      apiFetch('/api/settings', {
-        method: 'POST',
-        headers: { 'X-Device-Id': newId, 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings),
-      }).catch(() => {});
-    }
-  }, [settings]);
-
-  const handleChangeDeviceId = useCallback((newId: string) => {
-    const cleanId = setDeviceId(newId);
-    setDeviceIdState(cleanId);
-    setOrders([]);
-    apiFetch('/api/settings', {
-      method: 'POST',
-      headers: { 'X-Device-Id': cleanId, 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings),
-    }).catch(() => {});
-  }, [settings]);
+  }, [fetchServerStatus, fetchServerOrders, deviceId]);
 
   // If not unlocked, lock the entire interface with VIP ACCESS Screen
   if (!isVipUnlocked) {
@@ -555,11 +523,11 @@ export default function App() {
         onRefreshServer={handleRefreshServerOrders}
         isRefreshing={isRefreshing}
         vipCode={vipCode}
+        currentDeviceId={deviceId}
         onRelock={() => {
           localStorage.removeItem('vip_active_code');
           setIsVipUnlocked(false);
         }}
-        deviceId={deviceId}
       />
 
       {/* Main Content Area */}
@@ -568,17 +536,22 @@ export default function App() {
         {/* VIEW 1: Main Driver Dashboard */}
         {activeTab === 'dashboard' && (
           <div className="space-y-6 animate-fadeIn">
-            {/* 0. Device ID & Privacy Isolation Status */}
-            <DeviceSessionCard
-              deviceId={deviceId}
-              onRegenerateDeviceId={handleRegenerateDeviceId}
-              onChangeDeviceId={handleChangeDeviceId}
+            {/* 1. Representative Data Isolation & Device Profile Manager */}
+            <RepresentativeDeviceManager
+              currentDeviceId={deviceId}
+              onDeviceChanged={handleDeviceChanged}
               totalScanned={status.totalScanned}
               acceptedCount={status.acceptedCount}
               rejectedCount={status.rejectedCount}
+              acceptanceRate={status.acceptanceRate}
+              totalEarningsSar={status.totalEarningsSar}
+              isSyncing={isRefreshing}
             />
 
-            {/* 1. Android Native Integration Controls (Single App Mode) */}
+            {/* 1.5 Security & Anti-Reverse Engineering Protection Shield (ProGuard / R8 & API HMAC) */}
+            <SecurityShieldBadge currentDeviceId={deviceId} />
+
+            {/* 2. Android Native Integration Controls (Single App Mode) */}
             <AndroidNativeControls
               settings={settings}
               status={status}
@@ -586,32 +559,31 @@ export default function App() {
               onUpdateSettings={handleUpdateSettings}
             />
 
-            {/* 2. Main Controls: Master Start/Stop & Dual Distance Limits (Customer & Restaurant) */}
+            {/* 3. Main Controls: Master Start/Stop & Max Distance Threshold */}
             <MainControlCard
               settings={settings}
               status={status}
               onTogglePower={handleTogglePower}
               onUpdateMaxDistance={handleUpdateMaxDistance}
-              onUpdateMaxPickupDistance={handleUpdateMaxPickupDistance}
               onUpdateSettings={handleUpdateSettings}
               onGetLiveLocation={handleGetLiveGPSLocation}
               isLocating={isLocating}
             />
 
-            {/* 3. Live Status & Diagnostics Indicator */}
+            {/* 4. Live Status & Diagnostics Indicator */}
             <LiveStatusIndicator
               status={status}
               maxDistanceKm={settings.maxDistanceKm}
-              maxPickupDistanceKm={settings.maxPickupDistanceKm}
             />
 
-            {/* 4. Detected Orders Feed & History (Partitioned for this Device) */}
+            {/* 5. Detected Orders Feed & History */}
             <OrdersFeed
               orders={orders}
               maxDistanceKm={settings.maxDistanceKm}
               isRunning={status.isRunning}
               onClearOrders={handleClearOrders}
               onTestCustomOrder={handleProcessOrder}
+              currentDeviceId={deviceId}
             />
           </div>
         )}
@@ -632,7 +604,6 @@ export default function App() {
               latestOrder={orders[0] || null}
               onTogglePower={handleTogglePower}
               onUpdateMaxDistance={handleUpdateMaxDistance}
-              onUpdateMaxPickupDistance={handleUpdateMaxPickupDistance}
             />
           </div>
         )}
@@ -648,22 +619,18 @@ export default function App() {
 
       {/* Persistent Night-Mode Driver Footer */}
       <footer className="mt-auto border-t border-slate-800/80 bg-[#080c14] py-4 px-6 text-center text-xs text-slate-400">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-2 flex-wrap justify-center">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             <span className="text-slate-300 font-semibold">Locate Go - مساعد مناديب التوصيل والتحقق الجغرافي</span>
-            <span className="text-slate-500">|</span>
-            <span className="font-mono text-emerald-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
-              الجهاز: {deviceId}
-            </span>
+            <span className="text-slate-400">| متصل بالسيرفر المباشر</span>
           </div>
-          <div className="flex items-center gap-3 text-slate-400 font-mono text-xs">
-            <span>عميل: {settings.maxDistanceKm} كم</span>
-            <span>مطعم: {settings.maxPickupDistanceKm ?? 2.0} كم</span>
+          <div className="flex items-center gap-3 text-slate-400 font-mono">
+            <span>الحد الفعال: {settings.maxDistanceKm} كم</span>
             <span>•</span>
-            <span>طلباتك: {orders.length}</span>
+            <span>الطلبات: {orders.length}</span>
             <span>•</span>
-            <span className={status.isRunning ? 'text-emerald-400' : 'text-slate-500'}>
+            <span className={status.isRunning ? 'text-emerald-400' : 'text-slate-400'}>
               {status.isRunning ? 'المراقبة تعمل' : 'متوقف'}
             </span>
           </div>

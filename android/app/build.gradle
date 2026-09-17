@@ -28,12 +28,17 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig signingConfigs.debug // For easy local APK signing
         }
         debug {
             applicationIdSuffix = ".debug"
             debuggable = true
-            minifyEnabled = false
+            // Enable ProGuard in debug if needed for testing obfuscation
+            minifyEnabled false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 

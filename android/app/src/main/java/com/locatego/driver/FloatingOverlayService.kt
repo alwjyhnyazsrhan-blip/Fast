@@ -73,12 +73,8 @@ class FloatingOverlayService : Service() {
             }
         }
 
-        val prefs = getSharedPreferences("locate_go_prefs", Context.MODE_PRIVATE)
-        val maxDelivery = prefs.getFloat("max_distance_km", 2.0f)
-        val maxPickup = prefs.getFloat("max_pickup_distance_km", 2.0f)
-
         val statusText = TextView(this).apply {
-            text = "⚡ Locate Go: مطعم ${maxPickup}ك • عميل ${maxDelivery}ك"
+            text = "⚡ Locate Go: نشط • 2.0 كم"
             setTextColor(Color.parseColor("#10B981"))
             textSize = 12f
             typeface = android.graphics.Typeface.DEFAULT_BOLD

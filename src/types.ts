@@ -14,6 +14,7 @@ export type AppSource =
 
 export interface OrderItem {
   id: string;
+  deviceId?: string;
   appSource: AppSource;
   appName: string;
   storeName: string;
@@ -34,8 +35,7 @@ export interface OrderItem {
 }
 
 export interface LocateGoSettings {
-  maxDistanceKm: number; // الحد الأقصى لمسافة العميل / الوجهة (كم)
-  maxPickupDistanceKm: number; // الحد الأقصى لمسافة المطعم / الاستلام (كم)
+  maxDistanceKm: number;
   autoAccept: boolean;
   soundAlerts: boolean;
   minPayoutSar: number;
@@ -50,6 +50,7 @@ export interface DriverLocation {
 }
 
 export interface LocateGoStatus {
+  deviceId: string;
   isRunning: boolean;
   isOverlayActive: boolean;
   isMonitoringScreen: boolean;
@@ -59,6 +60,8 @@ export interface LocateGoStatus {
   totalScanned: number;
   acceptedCount: number;
   rejectedCount: number;
+  acceptanceRate?: number;
+  totalEarningsSar?: number;
   serverConnected: boolean;
   driverLocation?: DriverLocation | null;
 }
