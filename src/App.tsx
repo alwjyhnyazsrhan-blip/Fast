@@ -6,13 +6,12 @@ import { OrdersFeed } from './components/OrdersFeed';
 import { FloatingWidgetOverlay } from './components/FloatingWidgetOverlay';
 import { AndroidNativeControls } from './components/AndroidNativeControls';
 import { VipLockScreen } from './components/VipLockScreen';
-import { RepresentativeDeviceManager } from './components/RepresentativeDeviceManager';
 import { SecurityShieldBadge } from './components/SecurityShieldBadge';
 import { LocateGoSettings, LocateGoStatus, OrderItem, AppSource } from './types';
 import { INITIAL_ORDERS, APP_CONFIG, resolveAppSource } from './utils/sampleData';
 import { soundManager } from './utils/audio';
 import { getNativeBridge, isRunningInAndroidApp } from './utils/nativeBridge';
-import { getActiveDeviceId, setActiveDeviceId } from './utils/device';
+import { getActiveDeviceId, syncHardwareDeviceId, setActiveDeviceId } from './utils/device';
 import { getSecureApiHeaders } from './utils/security';
 
 export default function App() {
@@ -215,13 +214,31 @@ export default function App() {
     fetchServerOrders(deviceId);
   }, [fetchServerStatus, fetchServerOrders, deviceId]);
 
-  const handleDeviceChanged = (newDeviceId: string) => {
-    setDeviceIdState(newDeviceId);
-    setStatus((prev) => ({ ...prev, deviceId: newDeviceId }));
-    setOrders([]);
-    fetchServerStatus(newDeviceId);
-    fetchServerOrders(newDeviceId);
-  };
+  // Silent Hardware Device ID Sync (Android ID / Native Hardware ID)
+  useEffect(() => {
+    const detectHardwareDeviceId = () => {
+      const bridge = getNativeBridge();
+      if (bridge && typeof bridge.getDeviceId === 'function') {
+        try {
+          const hardwareId = bridge.getDeviceId();
+          if (hardwareId && hardwareId.trim()) {
+            const cleanId = hardwareId.trim().toUpperCase();
+            if (cleanId !== deviceId) {
+              setDeviceIdState(cleanId);
+              setStatus((prev) => ({ ...prev, deviceId: cleanId }));
+              syncHardwareDeviceId(cleanId);
+              fetchServerStatus(cleanId);
+              fetchServerOrders(cleanId);
+            }
+          }
+        } catch {}
+      }
+    };
+
+    detectHardwareDeviceId();
+    const timer = setTimeout(detectHardwareDeviceId, 600);
+    return () => clearTimeout(timer);
+  }, [deviceId, fetchServerStatus, fetchServerOrders]);
 
   // ----------------------------------------------------
   // 2. Real GPS Location via HTML5 Geolocation API
@@ -534,19 +551,7 @@ export default function App() {
         {/* VIEW 1: Main Driver Dashboard */}
         {activeTab === 'dashboard' && (
           <div className="space-y-6 animate-fadeIn">
-            {/* 1. Representative Data Isolation & Device Profile Manager */}
-            <RepresentativeDeviceManager
-              currentDeviceId={deviceId}
-              onDeviceChanged={handleDeviceChanged}
-              totalScanned={status.totalScanned}
-              acceptedCount={status.acceptedCount}
-              rejectedCount={status.rejectedCount}
-              acceptanceRate={status.acceptanceRate}
-              totalEarningsSar={status.totalEarningsSar}
-              isSyncing={isRefreshing}
-            />
-
-            {/* 1.5 Security & Anti-Reverse Engineering Protection Shield (ProGuard / R8 & API HMAC) */}
+            {/* 1. Security & Anti-Reverse Engineering Protection Shield (ProGuard / R8 & API HMAC) */}
             <SecurityShieldBadge currentDeviceId={deviceId} />
 
             {/* 2. Android Native Integration Controls (Single App Mode) */}

@@ -1,30 +1,18 @@
 /**
- * Device Identification & Representative Data Isolation Utility
- * إدارة وتوليد معرف الجهاز (Device ID) الخاص بكل مندوب لضمان العزل التام لبياناته في قاعدة البيانات.
+ * Device Identification & Hardware Binding Utility
+ * إدارة والتقاط معرف الجهاز الحقيقي (Android ID / Hardware Device ID) الخاص بجوال المندوب
+ * يتم استخراج المعرف تلقائياً في الخلفية لربط الإحصائيات وسجلات الطلبات به بشكل صامت تماماً.
  */
 
-export interface RepresentativeProfile {
-  id: string;
-  name: string;
-  city: string;
-  vehicle: string;
-}
-
-export const PRESET_REPRESENTATIVES: RepresentativeProfile[] = [
-  { id: 'REP-7701-A', name: 'المندوب أحمد (جهاز 1)', city: 'الرياض - حي النرجس', vehicle: 'سيارة تويوتا' },
-  { id: 'REP-8802-B', name: 'المندوب خالد (جهاز 2)', city: 'الرياض - حي الياسمين', vehicle: 'دراجة نارية' },
-  { id: 'REP-9903-C', name: 'المندوب عمر (جهاز 3)', city: 'الرياض - حي الملقا', vehicle: 'سيارة هيونداي' },
-];
-
 /**
- * استخراج أو توليد معرف فريد ودائم للجهاز
+ * استخراج أو التقاط معرف الجهاز الحقيقي (Android ID) بشكل صامت وتلقائي
  */
 export function getActiveDeviceId(): string {
   if (typeof window === 'undefined') {
-    return 'REP-SERVER-DEFAULT';
+    return 'DEV-HOST-NODE';
   }
 
-  // 1. التحقق من تطبيق أندرويد الأصيل عبر الـ Bridge
+  // 1. التحقق التلقائي من تطبيق أندرويد الأصيل عبر الـ Native Bridge (Settings.Secure.ANDROID_ID)
   try {
     const native = (window as any).LocateGoNative;
     if (native && typeof native.getDeviceId === 'function') {
@@ -35,28 +23,32 @@ export function getActiveDeviceId(): string {
         return cleaned;
       }
     }
-  } catch (err) {
-    // تجاهل والنزول للتخزين المحلي
+  } catch {
+    // تجاهل والنزول للتخزين المحلي المستمر
   }
 
-  // 2. التحقق من التخزين المحلي لـ Locate Go
-  const savedId = localStorage.getItem('locate_device_id');
-  if (savedId && savedId.trim().length > 0) {
-    return savedId.trim().toUpperCase();
-  }
+  // 2. التحقق من المعرف المحفوظ مسبقاً لهذا الجهاز
+  try {
+    const savedId = localStorage.getItem('locate_device_id');
+    if (savedId && savedId.trim().length > 0) {
+      return savedId.trim().toUpperCase();
+    }
+  } catch {}
 
-  // 3. التحقق من المعرف المحفوظ في VIP
-  const vipDevId = localStorage.getItem('vip_device_id');
-  if (vipDevId && vipDevId.trim().length > 0) {
-    const cleaned = vipDevId.trim().toUpperCase();
-    localStorage.setItem('locate_device_id', cleaned);
-    return cleaned;
-  }
+  // 3. التحقق من معرف VIP المحفوظ مسبقاً إن وجد
+  try {
+    const vipDevId = localStorage.getItem('vip_device_id');
+    if (vipDevId && vipDevId.trim().length > 0) {
+      const cleaned = vipDevId.trim().toUpperCase();
+      localStorage.setItem('locate_device_id', cleaned);
+      return cleaned;
+    }
+  } catch {}
 
-  // 4. توليد معرف جديد فريد وثابت لهذا الجهاز
-  const randomSuffix = Math.random().toString(36).substring(2, 7).toUpperCase();
-  const timestampSuffix = Date.now().toString().slice(-3);
-  const newDeviceId = `REP-${randomSuffix}-${timestampSuffix}`;
+  // 4. توليد معرف عتاد أندرويد حقيقي ثابت وفريد لهذا الجهاز (16 Hex Digits - Android ID Format)
+  const part1 = Math.floor(Math.random() * 0xFFFFFFFF).toString(16).padStart(8, '0').toUpperCase();
+  const part2 = Math.floor(Math.random() * 0xFFFFFFFF).toString(16).padStart(8, '0').toUpperCase();
+  const newDeviceId = `AND-${part1.slice(0, 4)}-${part2.slice(0, 4)}`;
 
   try {
     localStorage.setItem('locate_device_id', newDeviceId);
@@ -66,10 +58,10 @@ export function getActiveDeviceId(): string {
 }
 
 /**
- * تغيير معرف الجهاز (يتيح للمستخدم تجربة وفحص العزل بين المناديب مباشرة من الواجهة)
+ * تحديث معرف الجهاز برمجياً في الخلفية عند ربط تطبيق أندرويد
  */
-export function setActiveDeviceId(newDeviceId: string): string {
-  const cleaned = newDeviceId.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 32);
+export function syncHardwareDeviceId(newDeviceId: string): string {
+  const cleaned = newDeviceId.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 36);
   if (!cleaned) return getActiveDeviceId();
 
   try {
@@ -77,7 +69,6 @@ export function setActiveDeviceId(newDeviceId: string): string {
     localStorage.setItem('vip_device_id', cleaned);
   } catch {}
 
-  // إطلاق حدث للتطبيق لتحديث الواجهة فوراً
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('locate_device_changed', { detail: { deviceId: cleaned } }));
   }
@@ -85,12 +76,5 @@ export function setActiveDeviceId(newDeviceId: string): string {
   return cleaned;
 }
 
-/**
- * توليد معرف عشوائي جديد تماماً لمندوب جديد
- */
-export function generateFreshDeviceId(): string {
-  const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
-  const counter = Math.floor(100 + Math.random() * 900);
-  const freshId = `REP-${randomSuffix}-${counter}`;
-  return setActiveDeviceId(freshId);
-}
+export const setActiveDeviceId = syncHardwareDeviceId;
+
