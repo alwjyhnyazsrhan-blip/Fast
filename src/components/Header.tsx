@@ -7,11 +7,9 @@ import {
   VolumeX, 
   Smartphone, 
   LayoutDashboard, 
-  Code2, 
-  Server,
-  RefreshCw,
-  Wifi,
-  WifiOff
+  RefreshCw, 
+  Wifi, 
+  WifiOff 
 } from 'lucide-react';
 import { LocateGoStatus } from '../types';
 
@@ -19,8 +17,8 @@ interface HeaderProps {
   status: LocateGoStatus;
   soundEnabled: boolean;
   onToggleSound: () => void;
-  activeTab: 'dashboard' | 'server' | 'floating' | 'code';
-  onChangeTab: (tab: 'dashboard' | 'server' | 'floating' | 'code') => void;
+  activeTab: 'dashboard' | 'floating' | string;
+  onChangeTab: (tab: 'dashboard' | 'floating') => void;
   onRefreshServer: () => void;
   isRefreshing?: boolean;
   vipCode?: string;
@@ -69,7 +67,7 @@ export const Header: React.FC<HeaderProps> = ({
                 {status.serverConnected ? (
                   <span className="flex items-center gap-1 text-[11px] text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded-full border border-emerald-500/30">
                     <Wifi className="w-3 h-3 text-emerald-400" />
-                    السيرفر متصل
+                    النظام متصل
                   </span>
                 ) : (
                   <span className="flex items-center gap-1 text-[11px] text-amber-400 bg-amber-950/50 px-2 py-0.5 rounded-full border border-amber-500/30">
@@ -84,7 +82,7 @@ export const Header: React.FC<HeaderProps> = ({
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-400">نظام معالجة وتصفية طلبات التوصيل والتحقق الجغرافي</p>
+              <p className="text-xs text-slate-400">نظام معالجة وتصفية طلبات التوصيل والتحقق الجغرافي للمناديب</p>
             </div>
           </div>
 
@@ -104,59 +102,32 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Navigation Tabs */}
+        {/* Courier Navigation Tabs (Developer and hosting tabs removed) */}
         <div className="flex items-center gap-1.5 p-1 bg-slate-900/80 rounded-xl border border-slate-800 self-center overflow-x-auto max-w-full">
           <button
             id="tab-dashboard-btn"
             onClick={() => onChangeTab('dashboard')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
               activeTab === 'dashboard'
                 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
             }`}
           >
             <LayoutDashboard className="w-3.5 h-3.5" />
-            <span>لوحة التحكم المباشرة</span>
-          </button>
-
-          <button
-            id="tab-server-btn"
-            onClick={() => onChangeTab('server')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
-              activeTab === 'server'
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <Server className="w-3.5 h-3.5 text-emerald-400" />
-            <span>كود السيرفر والاستضافة المجانية</span>
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span>لوحة تحكم السائق</span>
           </button>
 
           <button
             id="tab-floating-btn"
             onClick={() => onChangeTab('floating')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
               activeTab === 'floating'
                 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
             }`}
           >
-            <Smartphone className="w-3.5 h-3.5" />
+            <Smartphone className="w-3.5 h-3.5 text-cyan-400" />
             <span>النافذة العائمة (شاشة الجوال)</span>
-          </button>
-
-          <button
-            id="tab-code-btn"
-            onClick={() => onChangeTab('code')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
-              activeTab === 'code'
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <Code2 className="w-3.5 h-3.5" />
-            <span>كود أندرويد</span>
           </button>
         </div>
 
@@ -166,11 +137,11 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             id="btn-refresh-server"
             onClick={onRefreshServer}
-            title="مزامنة وتحديث الطلبات الواردة من السيرفر المباشر"
+            title="مزامنة وتحديث سجل الطلبات اللحظي"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 border-slate-700 shadow-sm cursor-pointer active:scale-95"
           >
             <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isRefreshing ? 'animate-spin' : ''}`} />
-            <span>مزامنة السيرفر</span>
+            <span>تحديث الطلبات</span>
           </button>
 
           {/* VIP Status Badge */}

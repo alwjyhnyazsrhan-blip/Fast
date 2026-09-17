@@ -4,8 +4,6 @@ import { MainControlCard } from './components/MainControlCard';
 import { LiveStatusIndicator } from './components/LiveStatusIndicator';
 import { OrdersFeed } from './components/OrdersFeed';
 import { FloatingWidgetOverlay } from './components/FloatingWidgetOverlay';
-import { AndroidCodeGuideModal } from './components/AndroidCodeGuideModal';
-import { ServerDeployGuide } from './components/ServerDeployGuide';
 import { AndroidNativeControls } from './components/AndroidNativeControls';
 import { VipLockScreen } from './components/VipLockScreen';
 import { RepresentativeDeviceManager } from './components/RepresentativeDeviceManager';
@@ -28,7 +26,7 @@ export default function App() {
   });
 
   const [orders, setOrders] = useState<OrderItem[]>([]);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'server' | 'floating' | 'code'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'floating'>('dashboard');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [isLocating, setIsLocating] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -588,14 +586,7 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 2: Real Server & Free Hosting Guide */}
-        {activeTab === 'server' && (
-          <div className="animate-fadeIn">
-            <ServerDeployGuide />
-          </div>
-        )}
-
-        {/* VIEW 3: Floating Mobile Phone Simulation */}
+        {/* VIEW 2: Floating Mobile Phone Simulation for Couriers */}
         {activeTab === 'floating' && (
           <div className="animate-fadeIn">
             <FloatingWidgetOverlay
@@ -608,13 +599,6 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 4: Android Accessibility Service & Render Integration Guide */}
-        {activeTab === 'code' && (
-          <div className="animate-fadeIn">
-            <AndroidCodeGuideModal />
-          </div>
-        )}
-
       </main>
 
       {/* Persistent Night-Mode Driver Footer */}
@@ -622,8 +606,8 @@ export default function App() {
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-slate-300 font-semibold">Locate Go - مساعد مناديب التوصيل والتحقق الجغرافي</span>
-            <span className="text-slate-400">| متصل بالسيرفر المباشر</span>
+            <span className="text-slate-300 font-semibold">Locate Go - لوحة تحكم المناديب والتحقق الجغرافي</span>
+            <span className="text-slate-400">| نظام الفلترة المباشر</span>
           </div>
           <div className="flex items-center gap-3 text-slate-400 font-mono">
             <span>الحد الفعال: {settings.maxDistanceKm} كم</span>
