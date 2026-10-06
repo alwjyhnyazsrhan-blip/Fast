@@ -37,6 +37,13 @@ class FloatingOverlayService : Service() {
     override fun onCreate() {
         super.onCreate()
 
+        val prefs = getSharedPreferences("locate_go_prefs", Context.MODE_PRIVATE)
+        val isLicensed = prefs.getBoolean("is_vip_licensed", false)
+        if (!isLicensed) {
+            stopSelf()
+            return
+        }
+
         if (!Settings.canDrawOverlays(this)) {
             stopSelf()
             return

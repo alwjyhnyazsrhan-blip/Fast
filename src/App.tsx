@@ -50,17 +50,43 @@ export default function App() {
     }
   }, []);
 
-  // Listen for VIP Unlock event from data-bridge.js
+  // 🛡️ شرط صارم في البداية: فحص حالة الترخيص المخزنة (is_vip_licensed)
+  // إذا لم تكن مفعلة وصحيحة، يمنع منعاً باتاً تشغيل أي خدمة خلفية وتظل شاشة القفل وحدها
+  useEffect(() => {
+    const bridge = getNativeBridge();
+    if (bridge) {
+      try {
+        const isLicensed = typeof bridge.isVipLicensed === 'function' ? bridge.isVipLicensed() : false;
+        if (!isLicensed) {
+          if (typeof bridge.killAllServices === 'function') {
+            bridge.killAllServices();
+          } else {
+            bridge.setTrackingActive(false);
+          }
+        }
+      } catch {}
+    }
+  }, []);
+
+  // Listen for VIP Unlock event from data-bridge.js or native WebView
   useEffect(() => {
     const handleVipEvent = (e: any) => {
       setIsVipUnlocked(true);
       if (e.detail?.code) setVipCode(e.detail.code);
+      const bridge = getNativeBridge();
+      if (bridge && typeof bridge.setVipLicensed === 'function') {
+        bridge.setVipLicensed(true);
+      }
     };
 
     window.addEventListener('vip_unlocked', handleVipEvent);
     (window as any).onVipUnlocked = (data: any) => {
       setIsVipUnlocked(true);
       if (data?.code) setVipCode(data.code);
+      const bridge = getNativeBridge();
+      if (bridge && typeof bridge.setVipLicensed === 'function') {
+        bridge.setVipLicensed(true);
+      }
     };
 
     return () => {
@@ -71,15 +97,15 @@ export default function App() {
 
   const [status, setStatus] = useState<LocateGoStatus>({
     deviceId: getActiveDeviceId(),
-    isRunning: true,
-    isOverlayActive: true,
-    isMonitoringScreen: true,
-    fps: 5.2,
-    latencyMs: 14,
+    isRunning: false,
+    isOverlayActive: false,
+    isMonitoringScreen: false,
+    fps: 0,
+    latencyMs: 0,
     lastScanTimestamp: Date.now(),
-    totalScanned: orders.length,
-    acceptedCount: orders.filter((o) => o.status === 'accepted').length,
-    rejectedCount: orders.filter((o) => o.status === 'rejected').length,
+    totalScanned: 0,
+    acceptedCount: 0,
+    rejectedCount: 0,
     serverConnected: false,
     driverLocation: null,
   });
@@ -108,6 +134,9 @@ export default function App() {
       const bridge = getNativeBridge();
       if (bridge) {
         try {
+          if (typeof bridge.setVipLicensed === 'function') {
+            bridge.setVipLicensed(false);
+          }
           if (typeof bridge.killAllServices === 'function') {
             bridge.killAllServices();
           } else if (typeof bridge.stopAllServices === 'function') {
@@ -261,9 +290,12 @@ export default function App() {
 
     // Register callback for continuous real-time sync from Kotlin MainActivity
     window.onLocateGoNativeSync = (nativeState) => {
+      if (nativeState.isVipLicensed === false) {
+        setIsVipUnlocked(false);
+      }
       setStatus((prev) => ({
         ...prev,
-        isRunning: nativeState.isTrackingRunning,
+        isRunning: nativeState.isVipLicensed === false ? false : nativeState.isTrackingRunning,
         driverLocation: nativeState.lat && nativeState.lng ? {
           lat: nativeState.lat,
           lng: nativeState.lng,
@@ -654,6 +686,10 @@ export default function App() {
           setTerminationNotice(null);
           setVipCode(code);
           setIsVipUnlocked(true);
+          const bridge = getNativeBridge();
+          if (bridge && typeof bridge.setVipLicensed === 'function') {
+            bridge.setVipLicensed(true);
+          }
         }}
       />
     );

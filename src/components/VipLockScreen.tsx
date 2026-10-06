@@ -88,6 +88,14 @@ export const VipLockScreen: React.FC<VipLockScreenProps> = ({ onUnlock, initialE
         if (savedCode) {
           setCode(savedCode);
           await verifyAndUnlock(savedCode, true);
+        } else {
+          // في حال عدم وجود كود مخزن مسبقاً، نضمن قتل أي خدمات خلفية وإزالة الإشعارات
+          try {
+            const bridge = (window as any).LocateGoNative;
+            if (bridge && typeof bridge.killAllServices === 'function') {
+              bridge.killAllServices();
+            }
+          } catch {}
         }
       } catch (err) {
         console.warn('VIP Auto-login check failed:', err);
@@ -191,6 +199,14 @@ export const VipLockScreen: React.FC<VipLockScreenProps> = ({ onUnlock, initialE
       localStorage.setItem('vip_active_code', normalized);
       localStorage.setItem('vip_device_id', currentDevice);
       localStorage.removeItem('vip_termination_notice');
+
+      // Update native Android bridge license flag
+      try {
+        const bridge = (window as any).LocateGoNative;
+        if (bridge && typeof bridge.setVipLicensed === 'function') {
+          bridge.setVipLicensed(true);
+        }
+      } catch {}
 
       // Register device if not registered yet
       if (match.used_by !== currentDevice) {

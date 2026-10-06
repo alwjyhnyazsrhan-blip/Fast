@@ -2,6 +2,7 @@ package com.locatego.driver
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -12,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.util.Log
 import android.view.View
 import android.webkit.*
 import android.widget.FrameLayout
@@ -46,8 +48,11 @@ class MainActivity : AppCompatActivity() {
 
         if (fineGranted || coarseGranted) {
             Toast.makeText(this, "تم منح إذن الموقع الجغرافي بنجاح", Toast.LENGTH_SHORT).show()
-            startLocationService()
-            requestBackgroundLocationIfNeeded()
+            // منع تشغيل الخدمة إطلاقاً إلا إذا كان الترخيص مفعلاً وصحيحاً
+            if (isVipLicensed()) {
+                startLocationService()
+                requestBackgroundLocationIfNeeded()
+            }
         } else {
             Toast.makeText(this, "يجب منح إذن الموقع لتصفية الطلبات في نطاق 2 كم", Toast.LENGTH_LONG).show()
         }
@@ -62,6 +67,15 @@ class MainActivity : AppCompatActivity() {
         bridge = LocateGoNativeBridge(this)
 
         setupSingleAppUi()
+
+        // 🛡️ شرط صارم في البداية: فحص حالة الترخيص المخزنة (is_vip_licensed)
+        // فإذا لم تكن مفعلة وصحيحة، يمنع منعاً باتاً تشغيل أي خدمة خلفية وتظهر شاشة القفل وحدها
+        if (!isVipLicensed()) {
+            Log.i("MainActivity", "🚨 بداية التشغيل: كود VIP غير مفعل. يتم فوراً قتل كافة الخدمات الخلفية ومنع أي إشعارات.")
+            killAllBackgroundServicesAndNotifications()
+        }
+
+        // فحص وطلب الأذونات فقط بدون تشغيل أي خدمات خلفية إذا لم يكن مرخصاً
         checkAndRequestPermissions()
 
         // معالجة زر الرجوع في الأندرويد لتصفح الـ WebView بسلاسة
@@ -136,14 +150,26 @@ class MainActivity : AppCompatActivity() {
                 val url = request?.url?.toString() ?: ""
                 if (url.startsWith("vip://unlock")) {
                     runOnUiThread {
+                        getSharedPreferences("locate_go_prefs", Context.MODE_PRIVATE)
+                            .edit()
+                            .putBoolean("is_vip_licensed", true)
+                            .apply()
+
                         Toast.makeText(this@MainActivity, "👑 تم قبول كود VIP وفتح التطبيق بنجاح!", Toast.LENGTH_SHORT).show()
                         view?.evaluateJavascript("if (window.onVipUnlocked) window.onVipUnlocked();", null)
+
+                        // تفعيل الخدمات الخلفية الآن فقط وفقط بعد نجاح عملية التحقق وإدخال كود ساري
+                        if (hasLocationPermissions()) {
+                            startLocationService()
+                        }
+                        syncStateToWeb()
                     }
                     return true
                 }
                 if (url.startsWith("vip://lock")) {
-                    // منع خطأ ERR_UNKNOWN_URL_SCHEME والتعامل مع القفل بسلاسة
+                    // إيقاف وقتل كافة الخدمات وإزالة الإشعارات فور القفل
                     runOnUiThread {
+                        killAllBackgroundServicesAndNotifications()
                         view?.evaluateJavascript("if (window.onVipRelock) window.onVipRelock();", null)
                     }
                     return true
@@ -202,8 +228,9 @@ class MainActivity : AppCompatActivity() {
     fun syncStateToWeb() {
         lifecycleScope.launch {
             delay(300)
-            val isRunning = LocationTrackingService.isServiceRunning
-            val isOverlay = FloatingOverlayService.isOverlayShowing
+            val isLicensed = isVipLicensed()
+            val isRunning = LocationTrackingService.isServiceRunning && isLicensed
+            val isOverlay = FloatingOverlayService.isOverlayShowing && isLicensed
             val lat = LocationTrackingService.currentLatitude ?: 0.0
             val lng = LocationTrackingService.currentLongitude ?: 0.0
 
@@ -211,6 +238,7 @@ class MainActivity : AppCompatActivity() {
                 if (window.onLocateGoNativeSync) {
                     window.onLocateGoNativeSync({
                         isNativeApp: true,
+                        isVipLicensed: $isLicensed,
                         isTrackingRunning: $isRunning,
                         isOverlayShowing: $isOverlay,
                         lat: $lat,
@@ -222,13 +250,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    fun isVipLicensed(): Boolean {
+        return getSharedPreferences("locate_go_prefs", Context.MODE_PRIVATE)
+            .getBoolean("is_vip_licensed", false)
+    }
+
+    fun hasLocationPermissions(): Boolean {
+        val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        return fine || coarse
+    }
+
     fun startLocationService() {
-        try {
-            getSharedPreferences("locate_go_prefs", Context.MODE_PRIVATE)
-                .edit()
-                .putBoolean("is_vip_licensed", true)
-                .apply()
-        } catch (e: Exception) {}
+        // فحص صارم: يمنع منعاً باتاً تشغيل الخدمة إذا لم يكن كود VIP سارياً ومفعلاً
+        if (!isVipLicensed()) {
+            Log.w("MainActivity", "🚨 تم حظر تشغيل خدمة الموقع: التطبيق غير مرخص بكود VIP.")
+            return
+        }
 
         val intent = Intent(this, LocationTrackingService::class.java).apply {
             action = LocationTrackingService.ACTION_START
@@ -322,7 +360,10 @@ class MainActivity : AppCompatActivity() {
         if (missing.isNotEmpty()) {
             requestLocationPermissionLauncher.launch(missing.toTypedArray())
         } else {
-            startLocationService()
+            // لا يتم تشغيل الخدمة تلقائياً عند فتح التطبيق إلا إذا كان الترخيص مفعلاً وصحيحاً
+            if (isVipLicensed()) {
+                startLocationService()
+            }
         }
     }
 

@@ -160,6 +160,10 @@ class LocateGoAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
 
+        // فحص صارم لحالة ترخيص VIP: إذا لم تكن مفعلة يمنع الرصد والنقر منعاً باتاً
+        val prefs = getSharedPreferences("locate_go_prefs", Context.MODE_PRIVATE)
+        if (!prefs.getBoolean("is_vip_licensed", false)) return
+
         val packageName: String = event.packageName?.toString() ?: ""
         if (!isTargetPackage(packageName)) return
 

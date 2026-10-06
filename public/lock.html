@@ -146,6 +146,12 @@ window.onload = async function() {
         if (savedCode) {
             document.getElementById('codeInput').value = savedCode;
             await handleLogin(true); // تسجيل دخول صامت
+        } else {
+            try {
+                if (window.LocateGoNative && typeof window.LocateGoNative.killAllServices === 'function') {
+                    window.LocateGoNative.killAllServices();
+                }
+            } catch(e) {}
         }
     }
     document.getElementById('preloader').style.display = 'none';
@@ -239,6 +245,12 @@ async function handleLogin(isAuto = false) {
 
         // حفظ الكود للبقاء مسجلاً
         localStorage.setItem('vip_active_code', raw);
+        try {
+            if (window.LocateGoNative && typeof window.LocateGoNative.setVipLicensed === 'function') {
+                window.LocateGoNative.setVipLicensed(true);
+            }
+            window.location.href = "vip://unlock";
+        } catch(e) {}
 
         if (match.used_by !== currentDevice) {
             await fetch(`tables/${TABLE}/${match.id}`, {

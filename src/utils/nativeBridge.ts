@@ -17,6 +17,8 @@ export interface LocateGoNativeInterface {
   getSecurityStatusJson?(): string;
   killAllServices?(): boolean;
   stopAllServices?(): boolean;
+  isVipLicensed?(): boolean;
+  setVipLicensed?(licensed: boolean): boolean;
 }
 
 declare global {
@@ -24,6 +26,7 @@ declare global {
     LocateGoNative?: LocateGoNativeInterface;
     onLocateGoNativeSync?: (state: {
       isNativeApp: boolean;
+      isVipLicensed?: boolean;
       isTrackingRunning: boolean;
       isOverlayShowing: boolean;
       lat: number;

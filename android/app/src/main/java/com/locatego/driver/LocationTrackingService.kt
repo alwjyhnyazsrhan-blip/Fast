@@ -79,6 +79,13 @@ class LocationTrackingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        val prefs = getSharedPreferences("locate_go_prefs", Context.MODE_PRIVATE)
+        val isLicensed = prefs.getBoolean("is_vip_licensed", false)
+        if (!isLicensed) {
+            Log.w("LocationService", "🚨 محاولة إنشاء خدمة التتبع بدون ترخيص VIP! تم إيقاف الخدمة فوراً.")
+            stopSelf()
+            return
+        }
         renderApiClient = RenderApiClient(this)
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         createNotificationChannel()
@@ -100,8 +107,9 @@ class LocationTrackingService : Service() {
             }
             else -> {
                 val prefs = getSharedPreferences("locate_go_prefs", Context.MODE_PRIVATE)
-                val isLicensed = prefs.getBoolean("is_vip_licensed", true)
+                val isLicensed = prefs.getBoolean("is_vip_licensed", false)
                 if (!isLicensed) {
+                    Log.w("LocationService", "🚨 منع تشغيل الخدمة: كود VIP غير مفعل. يتم إيقاف الخدمة فوراً.")
                     stopTracking()
                     stopSelf()
                     return START_NOT_STICKY

@@ -76,12 +76,40 @@ class LocateGoNativeBridge(private val activity: MainActivity) {
     }
 
     /**
+     * التحقق مما إذا كان التطبيق مرخصاً بكود VIP ساري
+     */
+    @JavascriptInterface
+    fun isVipLicensed(): Boolean {
+        return prefs.getBoolean("is_vip_licensed", false)
+    }
+
+    /**
+     * تحديث حالة الترخيص يدوياً من واجهة الويب
+     */
+    @JavascriptInterface
+    fun setVipLicensed(licensed: Boolean): Boolean {
+        prefs.edit().putBoolean("is_vip_licensed", licensed).apply()
+        if (!licensed) {
+            activity.runOnUiThread {
+                activity.killAllBackgroundServicesAndNotifications()
+            }
+        }
+        return true
+    }
+
+    /**
      * تشغيل أو إيقاف خدمة التتبع الجغرافي والاعتراض
      */
     @JavascriptInterface
     fun setTrackingActive(active: Boolean) {
         activity.runOnUiThread {
+            val isLicensed = prefs.getBoolean("is_vip_licensed", false)
             if (active) {
+                if (!isLicensed) {
+                    Toast.makeText(activity, "⚠️ الأداة مقفلة: يرجى تفعيل كود VIP ساري لتشغيل الخدمات", Toast.LENGTH_SHORT).show()
+                    activity.killAllBackgroundServicesAndNotifications()
+                    return@runOnUiThread
+                }
                 activity.startLocationService()
                 Toast.makeText(activity, "⚡ تم تفعيل أداة التتبع والمراقبة بنجاح", Toast.LENGTH_SHORT).show()
             } else {
@@ -115,12 +143,14 @@ class LocateGoNativeBridge(private val activity: MainActivity) {
     @JavascriptInterface
     fun getAndroidStatusJson(): String {
         val hasOverlay = Settings.canDrawOverlays(activity)
-        val isTrackingRunning = LocationTrackingService.isServiceRunning
-        val isOverlayShowing = FloatingOverlayService.isOverlayShowing
+        val isLicensed = isVipLicensed()
+        val isTrackingRunning = LocationTrackingService.isServiceRunning && isLicensed
+        val isOverlayShowing = FloatingOverlayService.isOverlayShowing && isLicensed
         val lat = LocationTrackingService.currentLatitude
         val lng = LocationTrackingService.currentLongitude
 
         val json = JSONObject().apply {
+            put("isVipLicensed", isLicensed)
             put("isTrackingRunning", isTrackingRunning)
             put("hasOverlayPermission", hasOverlay)
             put("isOverlayShowing", isOverlayShowing)
@@ -156,6 +186,10 @@ class LocateGoNativeBridge(private val activity: MainActivity) {
     @JavascriptInterface
     fun toggleFloatingOverlay() {
         activity.runOnUiThread {
+            if (!isVipLicensed()) {
+                Toast.makeText(activity, "⚠️ الأداة مقفلة: يرجى تفعيل كود VIP ساري أولاً", Toast.LENGTH_SHORT).show()
+                return@runOnUiThread
+            }
             if (Settings.canDrawOverlays(activity)) {
                 if (FloatingOverlayService.isOverlayShowing) {
                     val intent = Intent(activity, FloatingOverlayService::class.java)
