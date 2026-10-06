@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 interface VipLockScreenProps {
   onUnlock: (code: string) => void;
+  initialError?: string | null;
 }
 
 export function getDeviceId(): string {
@@ -14,9 +15,10 @@ export function getDeviceId(): string {
   }
 }
 
-export const VipLockScreen: React.FC<VipLockScreenProps> = ({ onUnlock }) => {
+export const VipLockScreen: React.FC<VipLockScreenProps> = ({ onUnlock, initialError }) => {
   const [code, setCode] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [terminationNotice, setTerminationNotice] = useState<string | null>(initialError || null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [isInitialChecking, setIsInitialChecking] = useState(true);
@@ -24,6 +26,21 @@ export const VipLockScreen: React.FC<VipLockScreenProps> = ({ onUnlock }) => {
   const particlesRef = useRef<HTMLDivElement>(null);
 
   const TABLE = 'activation_codes';
+
+  // Check stored termination notice on mount
+  useEffect(() => {
+    try {
+      const rawNotice = localStorage.getItem('vip_termination_notice');
+      if (rawNotice) {
+        const parsed = JSON.parse(rawNotice);
+        if (parsed?.message) {
+          setTerminationNotice(parsed.message);
+        }
+      } else if (initialError) {
+        setTerminationNotice(initialError);
+      }
+    } catch {}
+  }, [initialError]);
 
   // Create floating particles effect
   useEffect(() => {
@@ -48,6 +65,12 @@ export const VipLockScreen: React.FC<VipLockScreenProps> = ({ onUnlock }) => {
     let isMounted = true;
     const checkSavedCode = async () => {
       try {
+        const rawNotice = localStorage.getItem('vip_termination_notice');
+        if (rawNotice || initialError) {
+          // If emergency termination happened, do not auto-login with expired session
+          if (isMounted) setIsInitialChecking(false);
+          return;
+        }
         const savedCode = localStorage.getItem('vip_active_code');
         if (savedCode) {
           setCode(savedCode);
@@ -64,7 +87,7 @@ export const VipLockScreen: React.FC<VipLockScreenProps> = ({ onUnlock }) => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [initialError]);
 
   const triggerError = (msg: string) => {
     setErrorMessage(msg);
@@ -265,11 +288,28 @@ export const VipLockScreen: React.FC<VipLockScreenProps> = ({ onUnlock }) => {
             الوصول المميز
           </p>
 
-          <h1 className="text-[34px] font-black text-center text-white tracking-[6px] uppercase mb-8 z-10 drop-shadow-[0_0_25px_rgba(255,255,255,0.3)] font-['Exo_2',sans-serif]">
+          <h1 className="text-[34px] font-black text-center text-white tracking-[6px] uppercase mb-6 z-10 drop-shadow-[0_0_25px_rgba(255,255,255,0.3)] font-['Exo_2',sans-serif]">
             <span className="bg-gradient-to-br from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
               VIP ACCESS
             </span>
           </h1>
+
+          {/* Emergency Termination / Expiration Alert Notice */}
+          {terminationNotice && (
+            <div className="w-full mb-5 p-3.5 bg-rose-950/80 border border-rose-500/80 rounded-2xl text-right z-10 shadow-[0_0_25px_rgba(244,63,94,0.3)] animate-fadeIn">
+              <div className="flex items-center gap-2 text-rose-300 font-bold text-xs mb-1">
+                <span className="text-base animate-bounce">🚨</span>
+                <span>تم إيقاف الخدمات تلقائياً: انتهاء صلاحية الكود</span>
+              </div>
+              <p className="text-[12px] text-rose-100/90 leading-relaxed font-sans">
+                {terminationNotice}
+              </p>
+              <div className="mt-2 text-[10px] text-rose-400/80 flex items-center justify-between border-t border-rose-800/50 pt-1.5">
+                <span>تم تأمين الجلسة ومسح البيانات المؤقتة</span>
+                <span>يرجى إدخال كود جديد</span>
+              </div>
+            </div>
+          )}
 
           {/* Activation Form */}
           <form onSubmit={handleSubmit} className="w-full z-10 flex flex-col">
@@ -284,6 +324,7 @@ export const VipLockScreen: React.FC<VipLockScreenProps> = ({ onUnlock }) => {
                 onChange={(e) => {
                   setCode(e.target.value);
                   setErrorMessage('');
+                  if (terminationNotice) setTerminationNotice(null);
                 }}
                 placeholder="أدخل مفتاح التفعيل هنا"
                 autoComplete="off"

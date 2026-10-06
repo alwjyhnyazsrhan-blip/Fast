@@ -128,7 +128,7 @@ class DeviceDatabase {
     if (!rawId || typeof rawId !== 'string') {
       return 'REP-DEFAULT';
     }
-    const cleaned = rawId.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 32);
+    const cleaned = rawId.trim().toUpperCase().replace(/[^A-Z0-9_=-]/g, '').slice(0, 32);
     return cleaned.length > 0 ? cleaned : 'REP-DEFAULT';
   }
 

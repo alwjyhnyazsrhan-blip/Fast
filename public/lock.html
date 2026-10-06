@@ -133,10 +133,20 @@ const TABLE = 'activation_codes';
 // عند تشغيل الصفحة: فحص إذا كان هناك كود محفوظ وصالح
 window.onload = async function() {
     createParticles();
-    const savedCode = localStorage.getItem('vip_active_code');
-    if (savedCode) {
-        document.getElementById('codeInput').value = savedCode;
-        await handleLogin(true); // تسجيل دخول صامت
+    const noticeRaw = localStorage.getItem('vip_termination_notice');
+    if (noticeRaw) {
+        try {
+            const parsed = JSON.parse(noticeRaw);
+            if (parsed && parsed.message) {
+                setError('🚨 ' + parsed.message);
+            }
+        } catch(e) {}
+    } else {
+        const savedCode = localStorage.getItem('vip_active_code');
+        if (savedCode) {
+            document.getElementById('codeInput').value = savedCode;
+            await handleLogin(true); // تسجيل دخول صامت
+        }
     }
     document.getElementById('preloader').style.display = 'none';
 };

@@ -13,6 +13,11 @@ import { soundManager } from './utils/audio';
 import { getNativeBridge, isRunningInAndroidApp } from './utils/nativeBridge';
 import { getActiveDeviceId, syncHardwareDeviceId, setActiveDeviceId } from './utils/device';
 import { getSecureApiHeaders } from './utils/security';
+import {
+  validateLicenseOnline,
+  executeEmergencyTermination,
+  consumeTerminationNotice,
+} from './utils/licenseManager';
 
 export default function App() {
   const [deviceId, setDeviceIdState] = useState<string>(getActiveDeviceId());
@@ -30,9 +35,20 @@ export default function App() {
   const [isLocating, setIsLocating] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
-  // VIP Access Lock Screen State
+  // VIP Access Lock Screen & Periodic Heartbeat State
   const [isVipUnlocked, setIsVipUnlocked] = useState<boolean>(false);
   const [vipCode, setVipCode] = useState<string>('');
+  const [terminationNotice, setTerminationNotice] = useState<string | null>(null);
+  const [lastHeartbeatAt, setLastHeartbeatAt] = useState<number | null>(null);
+  const [remainingHours, setRemainingHours] = useState<number | null>(null);
+
+  // Consume any stored termination notice on initial mount
+  useEffect(() => {
+    const notice = consumeTerminationNotice();
+    if (notice?.message) {
+      setTerminationNotice(notice.message);
+    }
+  }, []);
 
   // Listen for VIP Unlock event from data-bridge.js
   useEffect(() => {
@@ -78,6 +94,108 @@ export default function App() {
     window.addEventListener('locate_device_changed', handleDeviceChangeEvent);
     return () => window.removeEventListener('locate_device_changed', handleDeviceChangeEvent);
   }, []);
+
+  // ----------------------------------------------------
+  // VIP LICENSE: EMERGENCY FORCE TERMINATION (إنهاء إجباري فوري)
+  // يوقف جميع العمليات والخدمات فوراً ويمسح بيانات الجلسة ويعيد التوجيه لشاشة VIP ACCESS
+  // ----------------------------------------------------
+  const handleEmergencyTermination = useCallback(
+    async (reason: string, message: string) => {
+      console.warn(`[App] 🚨 تنفيذ أمر الإنهاء الإجباري للخدمات: ${reason} - ${message}`);
+      setTerminationNotice(message);
+
+      await executeEmergencyTermination({
+        reason,
+        message,
+        deviceId,
+        onTerminate: () => {
+          setStatus((prev) => ({
+            ...prev,
+            isRunning: false,
+            isMonitoringScreen: false,
+          }));
+          setIsVipUnlocked(false);
+          setVipCode('');
+        },
+      });
+    },
+    [deviceId]
+  );
+
+  // ----------------------------------------------------
+  // VIP LICENSE: PERIODIC BACKGROUND HEARTBEAT (دالة الفحص الدوري كل دقيقة)
+  // تتحقق دورياً من قاعدة البيانات لصلاحية الكود، وتنفذ الإنهاء الإجباري فور ثبوت انتهائه
+  // ----------------------------------------------------
+  const runLicenseHeartbeat = useCallback(async () => {
+    const activeCode = vipCode || localStorage.getItem('vip_active_code');
+    if (!activeCode) {
+      await handleEmergencyTermination('missing_code', 'لم يتم العثور على كود ترخيص نشط في الجلسة');
+      return;
+    }
+
+    try {
+      const result = await validateLicenseOnline(activeCode, deviceId);
+
+      if (!result.isValid) {
+        // إذا كان خطأ شبكة مؤقت لا نوقف الخدمة فوراً بل ننتظر النبضة التالية
+        if (result.reason === 'network_error') {
+          console.warn('[Heartbeat] تعذر مؤقت للاتصال بقاعدة بيانات التراخيص، سيتم الفحص في الدقيقة القادمة.');
+          return;
+        }
+
+        // ثبوت انتهاء صلاحية الكود أو حذفه أو ربطه بجهاز آخر -> إنهاء إجباري فوري لجميع الخدمات!
+        await handleEmergencyTermination(
+          result.reason,
+          result.message || 'انتهت صلاحية كود الترخيص. تم إيقاف جميع العمليات وحماية الجلسة تلقائياً.'
+        );
+      } else {
+        // الكود سليم ونشط في قاعدة البيانات
+        setLastHeartbeatAt(Date.now());
+        if (typeof result.remainingHours === 'number') {
+          setRemainingHours(result.remainingHours);
+        }
+      }
+    } catch (err) {
+      console.error('[Heartbeat Error]:', err);
+    }
+  }, [vipCode, deviceId, handleEmergencyTermination]);
+
+  // تشغيل الفحص الدوري في الخلفية (كل دقيقة = 60,000 مللي ثانية)
+  useEffect(() => {
+    if (!isVipUnlocked) return;
+
+    // فحص أولي بعد فتح القفل
+    const initialTimer = setTimeout(() => {
+      runLicenseHeartbeat();
+    }, 1500);
+
+    // فحص دوري كل دقيقة
+    const intervalTimer = setInterval(() => {
+      runLicenseHeartbeat();
+    }, 60 * 1000);
+
+    const handleFocus = () => {
+      if (document.visibilityState === 'visible') {
+        runLicenseHeartbeat();
+      }
+    };
+
+    const handleOnline = () => {
+      runLicenseHeartbeat();
+    };
+
+    document.addEventListener('visibilitychange', handleFocus);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      clearTimeout(initialTimer);
+      clearInterval(intervalTimer);
+      document.removeEventListener('visibilitychange', handleFocus);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [isVipUnlocked, runLicenseHeartbeat]);
 
   // ----------------------------------------------------
   // 0. Single App Architecture: Listen for Android Bridge Sync
@@ -518,7 +636,9 @@ export default function App() {
   if (!isVipUnlocked) {
     return (
       <VipLockScreen
+        initialError={terminationNotice}
         onUnlock={(code) => {
+          setTerminationNotice(null);
           setVipCode(code);
           setIsVipUnlocked(true);
         }}
@@ -539,9 +659,10 @@ export default function App() {
         isRefreshing={isRefreshing}
         vipCode={vipCode}
         currentDeviceId={deviceId}
+        lastHeartbeatAt={lastHeartbeatAt}
+        remainingHours={remainingHours}
         onRelock={() => {
-          localStorage.removeItem('vip_active_code');
-          setIsVipUnlocked(false);
+          handleEmergencyTermination('user_relock', 'تم قفل التطبيق يدوياً والعودة لشاشة الدخول');
         }}
       />
 

@@ -136,6 +136,140 @@ async function startServer() {
   });
 
   // ==========================================
+  // 1.8 VIP LICENSE VERIFICATION & HEARTBEAT ENDPOINT
+  // ==========================================
+  const FIREBASE_DB_URL = "https://appprotector-79e9c-default-rtdb.firebaseio.com";
+
+  const handleLicenseCheck = async (req: Request, res: Response) => {
+    const deviceId = extractDeviceId(req);
+    const code = (req.query.code || req.body?.code || "").toString().trim().toUpperCase();
+
+    if (!code) {
+      return res.status(400).json({
+        isValid: false,
+        valid: false,
+        reason: "not_found",
+        message: "الرجاء تقديم كود الترخيص للتحقق منه",
+      });
+    }
+
+    try {
+      const response = await fetch(`${FIREBASE_DB_URL}/activation_codes.json`);
+      if (!response.ok) {
+        throw new Error(`Firebase RTDB responded with ${response.status}`);
+      }
+      const data: any = await response.json();
+      const codesList: any[] = data ? Object.values(data) : [];
+      const match = codesList.find(
+        (c: any) => (c?.code || "").toString().trim().toUpperCase() === code
+      );
+
+      if (!match) {
+        // Force-stop device processes on server
+        db.toggleRunning(deviceId, false);
+        return res.json({
+          isValid: false,
+          valid: false,
+          reason: "not_found",
+          message: "❌ كود الترخيص غير موجود في قاعدة البيانات",
+        });
+      }
+
+      // Check revoked or disabled status
+      const status = (match.status || "").toLowerCase();
+      if (status === "revoked" || status === "banned" || status === "disabled" || status === "cancelled") {
+        db.toggleRunning(deviceId, false);
+        return res.json({
+          isValid: false,
+          valid: false,
+          reason: "revoked",
+          message: "🚫 تم تعطيل أو إلغاء صلاحية كود الترخيص من قبل الإدارة",
+        });
+      }
+
+      // Check expiry date
+      if (match.expiry_date) {
+        const expiryTime = new Date(match.expiry_date).getTime();
+        if (!isNaN(expiryTime) && expiryTime <= Date.now()) {
+          db.toggleRunning(deviceId, false);
+          return res.json({
+            isValid: false,
+            valid: false,
+            reason: "expired",
+            message: `⏰ انتهت صلاحية اشتراكك في (${new Date(match.expiry_date).toLocaleDateString("ar-SA")})`,
+            expiryDate: match.expiry_date,
+            remainingHours: 0,
+          });
+        }
+      }
+
+      // Check device binding
+      const matchDevice = (match.used_by || "").trim();
+      const clientDevice = (req.query.deviceId || req.body?.deviceId || deviceId || "").toString().trim();
+      if (
+        matchDevice &&
+        matchDevice !== "" &&
+        matchDevice !== clientDevice &&
+        db.sanitizeDeviceId(matchDevice) !== db.sanitizeDeviceId(clientDevice)
+      ) {
+        db.toggleRunning(deviceId, false);
+        return res.json({
+          isValid: false,
+          valid: false,
+          reason: "device_mismatch",
+          message: "⚠️ كود الترخيص مرتبط بجوال أو جهاز آخر",
+          usedBy: match.used_by,
+        });
+      }
+
+      let remainingHours: number | undefined = undefined;
+      if (match.expiry_date) {
+        const diffMs = new Date(match.expiry_date).getTime() - Date.now();
+        remainingHours = Math.max(0, Math.round(diffMs / (1000 * 60 * 60)));
+      }
+
+      return res.json({
+        isValid: true,
+        valid: true,
+        reason: "active",
+        message: "✅ كود الترخيص نشط وصالح",
+        code: match.code,
+        expiryDate: match.expiry_date,
+        remainingHours,
+        checkedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error("[License Heartbeat Error]:", err);
+      return res.status(500).json({
+        isValid: false,
+        valid: false,
+        reason: "network_error",
+        message: "تعذر الاتصال بقاعدة بيانات التراخيص",
+      });
+    }
+  };
+
+  app.get("/api/license/verify", handleLicenseCheck);
+  app.post("/api/license/verify", handleLicenseCheck);
+  app.get("/api/license/heartbeat", handleLicenseCheck);
+  app.post("/api/license/heartbeat", handleLicenseCheck);
+
+  // Fallback proxy for tables/activation_codes
+  app.get("/tables/activation_codes*", async (_req: Request, res: Response) => {
+    try {
+      const response = await fetch(`${FIREBASE_DB_URL}/activation_codes.json`);
+      if (!response.ok) {
+        return res.status(response.status).json({ error: "Failed to fetch codes" });
+      }
+      const data: any = await response.json();
+      const arr = data ? Object.values(data) : [];
+      return res.json({ data: arr });
+    } catch {
+      return res.status(500).json({ error: "Database proxy error" });
+    }
+  });
+
+  // ==========================================
   // 2. GET CURRENT SYSTEM STATUS & STATS FOR SPECIFIC DEVICE
   // ==========================================
   app.get("/api/status", (req: Request, res: Response) => {

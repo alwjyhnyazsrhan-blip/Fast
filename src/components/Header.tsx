@@ -24,6 +24,8 @@ interface HeaderProps {
   vipCode?: string;
   onRelock?: () => void;
   currentDeviceId?: string;
+  lastHeartbeatAt?: number | null;
+  remainingHours?: number | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -37,6 +39,8 @@ export const Header: React.FC<HeaderProps> = ({
   vipCode,
   onRelock,
   currentDeviceId,
+  lastHeartbeatAt,
+  remainingHours,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-[#0c1220]/90 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 sm:px-6">
@@ -144,10 +148,26 @@ export const Header: React.FC<HeaderProps> = ({
             <span>تحديث الطلبات</span>
           </button>
 
-          {/* VIP Status Badge */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-semibold">
+          {/* VIP Status Badge with Real-Time Background Heartbeat Indicator */}
+          <div 
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-semibold"
+            title={
+              lastHeartbeatAt 
+                ? `فحص الترخيص الدوري نشط (كل دقيقة) - آخر تحقق سليم: ${new Date(lastHeartbeatAt).toLocaleTimeString('ar-SA')}` 
+                : 'فحص الترخيص الدوري نشط في الخلفية (كل دقيقة)'
+            }
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
             <span>👑 VIP</span>
-            {vipCode && <span className="hidden sm:inline font-mono text-[11px] text-amber-200/80">{vipCode}</span>}
+            {vipCode && <span className="hidden sm:inline font-mono text-[11px] text-amber-200/90">{vipCode}</span>}
+            {remainingHours !== null && remainingHours !== undefined && (
+              <span className="hidden md:inline text-[10px] bg-amber-950/80 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30 font-mono">
+                {remainingHours > 24 ? `${Math.floor(remainingHours / 24)} يوم` : `${remainingHours} س`}
+              </span>
+            )}
           </div>
 
           {/* Relock Button */}
