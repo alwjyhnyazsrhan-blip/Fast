@@ -213,12 +213,17 @@ export async function executeEmergencyTermination(options: {
     soundManager.playStop();
   } catch {}
 
-  // 3. إيقاف خدمة أندرويد الأصلية وخلفية النظام عبر Native Bridge
+  // 3. إيقاف وقتل كافة خدمات أندرويد الخلفية ومسح الإشعارات فوراً عبر Native Bridge
   const bridge = getNativeBridge();
   if (bridge) {
     try {
+      if (typeof bridge.killAllServices === 'function') {
+        bridge.killAllServices();
+      } else if (typeof bridge.stopAllServices === 'function') {
+        bridge.stopAllServices();
+      }
       bridge.setTrackingActive(false);
-      bridge.showToast?.(`🚨 تم إنهاء الخدمة: ${message}`);
+      bridge.showToast?.(`🛑 تم إيقاف وقتل كافة الخدمات وإزالة الإشعارات: ${message}`);
     } catch (bridgeErr) {
       console.warn('Native bridge stop call failed:', bridgeErr);
     }

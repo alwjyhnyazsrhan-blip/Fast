@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getVipDeviceId, isAuthorizedDevice } from '../utils/device';
+import { getNativeBridge } from '../utils/nativeBridge';
 
 interface VipLockScreenProps {
   onUnlock: (code: string) => void;
@@ -21,6 +22,23 @@ export const VipLockScreen: React.FC<VipLockScreenProps> = ({ onUnlock, initialE
   const particlesRef = useRef<HTMLDivElement>(null);
 
   const TABLE = 'activation_codes';
+
+  // عند ظهور شاشة القفل: إيقاف وقتل كافة خدمات أندرويد الخلفية ومسح الإشعارات فوراً
+  useEffect(() => {
+    const bridge = getNativeBridge();
+    if (bridge) {
+      try {
+        if (typeof bridge.killAllServices === 'function') {
+          bridge.killAllServices();
+        } else if (typeof bridge.stopAllServices === 'function') {
+          bridge.stopAllServices();
+        }
+        bridge.setTrackingActive(false);
+      } catch (err) {
+        console.warn('Failed to kill background services on lock screen mount:', err);
+      }
+    }
+  }, []);
 
   // Check stored termination notice on mount
   useEffect(() => {

@@ -223,6 +223,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun startLocationService() {
+        try {
+            getSharedPreferences("locate_go_prefs", Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean("is_vip_licensed", true)
+                .apply()
+        } catch (e: Exception) {}
+
         val intent = Intent(this, LocationTrackingService::class.java).apply {
             action = LocationTrackingService.ACTION_START
         }
@@ -234,10 +241,54 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun stopLocationService() {
-        val intent = Intent(this, LocationTrackingService::class.java).apply {
-            action = LocationTrackingService.ACTION_STOP
-        }
-        startService(intent)
+        try {
+            val intent = Intent(this, LocationTrackingService::class.java).apply {
+                action = LocationTrackingService.ACTION_STOP
+            }
+            startService(intent)
+        } catch (e: Exception) {}
+
+        try {
+            stopService(Intent(this, LocationTrackingService::class.java))
+        } catch (e: Exception) {}
+
+        try {
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            notificationManager?.cancel(LocationTrackingService.NOTIFICATION_ID)
+            notificationManager?.cancelAll()
+        } catch (e: Exception) {}
+    }
+
+    /**
+     * قتل وإيقاف كافة الخدمات الخلفية (Foreground / Overlay) وإزالة أي إشعارات فوراً
+     */
+    fun killAllBackgroundServicesAndNotifications() {
+        // 1. إيقاف خدمة التتبع الجغرافي وإلغاء إشعار الـ Foreground Service
+        stopLocationService()
+
+        // 2. إيقاف خدمة النافذة العائمة
+        try {
+            stopService(Intent(this, FloatingOverlayService::class.java))
+        } catch (e: Exception) {}
+
+        // 3. مسح كافة الإشعارات المرتبطة بالأداة فوراً من شريط الإشعارات
+        try {
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            notificationManager?.cancel(LocationTrackingService.NOTIFICATION_ID)
+            notificationManager?.cancelAll()
+        } catch (e: Exception) {}
+
+        // 4. تعطيل حالة الترخيص والقبول التلقائي محلياً لضمان عدم عودة الخدمة في الخلفية
+        try {
+            getSharedPreferences("locate_go_prefs", Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean("is_vip_licensed", false)
+                .putBoolean("auto_accept", false)
+                .apply()
+        } catch (e: Exception) {}
+
+        // 5. مزامنة الحالة اللحظية للواجهة
+        syncStateToWeb()
     }
 
     fun requestIgnoreBatteryOptimizations() {

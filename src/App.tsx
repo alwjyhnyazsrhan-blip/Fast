@@ -104,6 +104,19 @@ export default function App() {
       console.warn(`[App] 🚨 تنفيذ أمر الإنهاء الإجباري للخدمات: ${reason} - ${message}`);
       setTerminationNotice(message);
 
+      // قتل وإيقاف كافة خدمات أندرويد وإزالة الإشعارات فوراً
+      const bridge = getNativeBridge();
+      if (bridge) {
+        try {
+          if (typeof bridge.killAllServices === 'function') {
+            bridge.killAllServices();
+          } else if (typeof bridge.stopAllServices === 'function') {
+            bridge.stopAllServices();
+          }
+          bridge.setTrackingActive(false);
+        } catch {}
+      }
+
       await executeEmergencyTermination({
         reason,
         message,

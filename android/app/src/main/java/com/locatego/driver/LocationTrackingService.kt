@@ -99,6 +99,13 @@ class LocationTrackingService : Service() {
                 return START_NOT_STICKY
             }
             else -> {
+                val prefs = getSharedPreferences("locate_go_prefs", Context.MODE_PRIVATE)
+                val isLicensed = prefs.getBoolean("is_vip_licensed", true)
+                if (!isLicensed) {
+                    stopTracking()
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
                 startForeground(NOTIFICATION_ID, buildForegroundNotification("جاري تتبع الموقع في نطاق 2 كم..."))
                 startTracking()
                 isServiceRunning = true
@@ -146,10 +153,30 @@ class LocationTrackingService : Service() {
     }
 
     private fun stopTracking() {
-        fusedLocationClient.removeLocationUpdates(locationCallback)
+        try {
+            fusedLocationClient.removeLocationUpdates(locationCallback)
+        } catch (e: Exception) {}
+
         isServiceRunning = false
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        Log.i("LocationService", "Location tracking stopped.")
+        currentLatitude = null
+        currentLongitude = null
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (e: Exception) {}
+
+        try {
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            manager?.cancel(NOTIFICATION_ID)
+            manager?.cancelAll()
+        } catch (e: Exception) {}
+
+        Log.i("LocationService", "Location tracking stopped, foreground stopped, notifications removed.")
     }
 
     private fun hasLocationPermission(): Boolean {

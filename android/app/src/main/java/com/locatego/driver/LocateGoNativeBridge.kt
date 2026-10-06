@@ -85,11 +85,28 @@ class LocateGoNativeBridge(private val activity: MainActivity) {
                 activity.startLocationService()
                 Toast.makeText(activity, "⚡ تم تفعيل أداة التتبع والمراقبة بنجاح", Toast.LENGTH_SHORT).show()
             } else {
-                activity.stopLocationService()
-                Toast.makeText(activity, "⏸️ تم إيقاف أداة التتبع مؤقتاً", Toast.LENGTH_SHORT).show()
+                activity.killAllBackgroundServicesAndNotifications()
+                Toast.makeText(activity, "🛑 تم إيقاف وقتل كافة الخدمات وإزالة الإشعارات", Toast.LENGTH_SHORT).show()
             }
             activity.syncStateToWeb()
         }
+    }
+
+    /**
+     * إنهاء وقتل كافة الخدمات الخلفية (Foreground Services / Notification) فوراً
+     */
+    @JavascriptInterface
+    fun killAllServices(): Boolean {
+        activity.runOnUiThread {
+            activity.killAllBackgroundServicesAndNotifications()
+            Toast.makeText(activity, "🛑 تم إنهاء وقتل كافة الخدمات وإزالة الإشعارات فوراً", Toast.LENGTH_SHORT).show()
+        }
+        return true
+    }
+
+    @JavascriptInterface
+    fun stopAllServices(): Boolean {
+        return killAllServices()
     }
 
     /**

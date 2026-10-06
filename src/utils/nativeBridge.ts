@@ -15,6 +15,8 @@ export interface LocateGoNativeInterface {
   getDeviceId?(): string;
   setDeviceId?(newId: string): boolean;
   getSecurityStatusJson?(): string;
+  killAllServices?(): boolean;
+  stopAllServices?(): boolean;
 }
 
 declare global {
