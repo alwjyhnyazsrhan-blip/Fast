@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { getVipDeviceId, isAuthorizedDevice } from '../utils/device';
 
 interface VipLockScreenProps {
   onUnlock: (code: string) => void;
@@ -6,13 +7,7 @@ interface VipLockScreenProps {
 }
 
 export function getDeviceId(): string {
-  try {
-    const hw = typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency || '8') : '8';
-    const uaLen = typeof navigator !== 'undefined' ? navigator.userAgent.length : 120;
-    return (uaLen + btoa(String(hw))).slice(0, 10);
-  } catch {
-    return 'LOCATE_VIP1';
-  }
+  return getVipDeviceId();
 }
 
 export const VipLockScreen: React.FC<VipLockScreenProps> = ({ onUnlock, initialError }) => {
@@ -142,18 +137,31 @@ export const VipLockScreen: React.FC<VipLockScreenProps> = ({ onUnlock, initialE
         return false;
       }
 
-      // Check expiry date
-      if (match.expiry_date && new Date(match.expiry_date) < new Date()) {
+      // Check status
+      if (match.status === 'expired') {
         localStorage.removeItem('vip_active_code');
         if (!isAuto) {
-          triggerError('⏰ انتهى اشتراكك');
+          triggerError('⏰ انتهى اشتراكك في قاعدة البيانات');
           setIsLoading(false);
         }
         return false;
       }
 
-      // Check device ID binding
-      if (match.used_by && match.used_by !== '' && match.used_by !== currentDevice) {
+      // Check expiry date with 5-minute buffer
+      if (match.expiry_date) {
+        const expiryTime = new Date(match.expiry_date).getTime();
+        if (!isNaN(expiryTime) && Date.now() > expiryTime + 5 * 60 * 1000) {
+          localStorage.removeItem('vip_active_code');
+          if (!isAuto) {
+            triggerError('⏰ انتهى اشتراكك');
+            setIsLoading(false);
+          }
+          return false;
+        }
+      }
+
+      // Check device ID binding with isAuthorizedDevice
+      if (match.used_by && match.used_by.trim() !== '' && !isAuthorizedDevice(match.used_by, currentDevice)) {
         if (!isAuto) {
           triggerError('⚠️ مرتبط بجهاز آخر');
           setIsLoading(false);
@@ -164,6 +172,7 @@ export const VipLockScreen: React.FC<VipLockScreenProps> = ({ onUnlock, initialE
       // Save to localStorage
       localStorage.setItem('vip_active_code', normalized);
       localStorage.setItem('vip_device_id', currentDevice);
+      localStorage.removeItem('vip_termination_notice');
 
       // Register device if not registered yet
       if (match.used_by !== currentDevice) {
@@ -299,7 +308,7 @@ export const VipLockScreen: React.FC<VipLockScreenProps> = ({ onUnlock, initialE
             <div className="w-full mb-5 p-3.5 bg-rose-950/80 border border-rose-500/80 rounded-2xl text-right z-10 shadow-[0_0_25px_rgba(244,63,94,0.3)] animate-fadeIn">
               <div className="flex items-center gap-2 text-rose-300 font-bold text-xs mb-1">
                 <span className="text-base animate-bounce">🚨</span>
-                <span>تم إيقاف الخدمات تلقائياً: انتهاء صلاحية الكود</span>
+                <span>تنبيه نظام الحماية والتراخيص</span>
               </div>
               <p className="text-[12px] text-rose-100/90 leading-relaxed font-sans">
                 {terminationNotice}

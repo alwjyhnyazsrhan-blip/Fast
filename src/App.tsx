@@ -164,10 +164,10 @@ export default function App() {
   useEffect(() => {
     if (!isVipUnlocked) return;
 
-    // فحص أولي بعد فتح القفل
+    // فحص دوري في الخلفية (يبدأ بعد 45 ثانية من الدخول لتجنب أي تعارض ثم كل دقيقة)
     const initialTimer = setTimeout(() => {
       runLicenseHeartbeat();
-    }, 1500);
+    }, 45 * 1000);
 
     // فحص دوري كل دقيقة
     const intervalTimer = setInterval(() => {

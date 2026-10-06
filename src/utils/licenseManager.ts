@@ -5,7 +5,7 @@
 
 import { getNativeBridge } from './nativeBridge';
 import { soundManager } from './audio';
-import { getDeviceId } from '../components/VipLockScreen';
+import { getVipDeviceId, isAuthorizedDevice } from './device';
 
 export interface LicenseValidationResult {
   isValid: boolean;
@@ -41,15 +41,17 @@ export async function validateLicenseOnline(
     };
   }
 
-  const currentDevice = targetDeviceId || getDeviceId();
+  const currentDevice = targetDeviceId || getVipDeviceId();
+  const vipFingerprint = getVipDeviceId();
 
   try {
     // محاولة 1: الفحص عبر خادم Locate Go المحلي إن كان متاحاً
     try {
-      const serverCheckUrl = `/api/license/verify?code=${encodeURIComponent(normalized)}&deviceId=${encodeURIComponent(currentDevice)}`;
+      const serverCheckUrl = `/api/license/verify?code=${encodeURIComponent(normalized)}&deviceId=${encodeURIComponent(currentDevice)}&vipDeviceId=${encodeURIComponent(vipFingerprint)}`;
       const serverRes = await fetch(serverCheckUrl, {
         headers: {
           'X-Device-Id': currentDevice,
+          'X-Vip-Device-Id': vipFingerprint,
         },
       });
 
@@ -121,11 +123,22 @@ export async function validateLicenseOnline(
       };
     }
 
-    // 2. التحقق من انتهاء تاريخ الصلاحية
+    // التحقق من حالة الانتهاء الصريحة في قاعدة البيانات
+    if (status === 'expired') {
+      return {
+        isValid: false,
+        reason: 'expired',
+        message: '⏰ انتهى اشتراكك في قاعدة البيانات',
+        expiryDate: match.expiry_date,
+      };
+    }
+
+    // 2. التحقق من انتهاء تاريخ الصلاحية الفعلي المسجل بقاعدة البيانات مع هامش أمان لفروقات التوقيت
     if (match.expiry_date) {
       const expiryTimestamp = new Date(match.expiry_date).getTime();
       const now = Date.now();
-      if (!isNaN(expiryTimestamp) && expiryTimestamp <= now) {
+      // إضافة هامش زمني للأمان (5 دقائق = 300,000 مللي ثانية) لمنع أي تعارض مع فروقات التوقيت في الأجهزة
+      if (!isNaN(expiryTimestamp) && now > expiryTimestamp + 5 * 60 * 1000) {
         return {
           isValid: false,
           reason: 'expired',
@@ -136,21 +149,24 @@ export async function validateLicenseOnline(
       }
     }
 
-    // 3. التحقق من ارتباط الكود بجهاز آخر
-    if (match.used_by && match.used_by.trim() !== '' && match.used_by !== currentDevice) {
-      return {
-        isValid: false,
-        reason: 'device_mismatch',
-        message: '⚠️ كود الترخيص مرتبط بجوال أو جهاز آخر',
-        usedBy: match.used_by,
-      };
+    // 3. التحقق المرن والموثوق من ارتباط الكود بهذا الجهاز
+    if (match.used_by && match.used_by.trim() !== '') {
+      const isMatched = isAuthorizedDevice(match.used_by, currentDevice);
+      if (!isMatched) {
+        return {
+          isValid: false,
+          reason: 'device_mismatch',
+          message: '⚠️ كود الترخيص مرتبط بجوال أو جهاز آخر',
+          usedBy: match.used_by,
+        };
+      }
     }
 
-    // حساب الساعات المتبقية للاشتراك
+    // حساب الساعات المتبقية للاشتراك لعرضها فقط (دون التأثير على صلاحية الكود)
     let remainingHours: number | undefined = undefined;
     if (match.expiry_date) {
       const diffMs = new Date(match.expiry_date).getTime() - Date.now();
-      remainingHours = Math.max(0, Math.round(diffMs / (1000 * 60 * 60)));
+      remainingHours = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60)));
     }
 
     return {
@@ -209,7 +225,7 @@ export async function executeEmergencyTermination(options: {
   }
 
   // 4. إرسال أمر إيقاف فوري للخادم المحلي لقطع معالجة الطلبات الخاصة بهذا الجهاز
-  const targetId = deviceId || getDeviceId();
+  const targetId = deviceId || getVipDeviceId();
   try {
     fetch('/api/status/toggle', {
       method: 'POST',
@@ -221,10 +237,10 @@ export async function executeEmergencyTermination(options: {
     }).catch(() => {});
   } catch {}
 
-  // 5. مسح جميع بيانات الجلسة والتخزين المحلي الخاصة بالمستخدم
+  // 5. مسح بيانات الجلسة النشطة دون مسح معرف الجهاز الثابت!
   try {
     localStorage.removeItem('vip_active_code');
-    localStorage.removeItem('vip_device_id');
+    // لا نمسح vip_device_id إطلاقاً حتى تظل بصمة الجهاز ثابته وموثقة
     localStorage.removeItem('vip_admin_auth_v1');
     sessionStorage.clear();
 
@@ -246,11 +262,6 @@ export async function executeEmergencyTermination(options: {
         detail: { reason, message, timestamp: Date.now() },
       })
     );
-  } catch {}
-
-  // 7. إشعار WebView في تطبيقات أندرويد عبر توجيه الرابط المخصص
-  try {
-    window.location.href = 'vip://lock';
   } catch {}
 }
 

@@ -141,6 +141,13 @@ class MainActivity : AppCompatActivity() {
                     }
                     return true
                 }
+                if (url.startsWith("vip://lock")) {
+                    // منع خطأ ERR_UNKNOWN_URL_SCHEME والتعامل مع القفل بسلاسة
+                    runOnUiThread {
+                        view?.evaluateJavascript("if (window.onVipRelock) window.onVipRelock();", null)
+                    }
+                    return true
+                }
                 if (url.startsWith("https://t.me/") || url.startsWith("tg://")) {
                     try {
                         startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))

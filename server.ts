@@ -187,10 +187,22 @@ async function startServer() {
         });
       }
 
-      // Check expiry date
+      // Check status
+      if (status === "expired") {
+        db.toggleRunning(deviceId, false);
+        return res.json({
+          isValid: false,
+          valid: false,
+          reason: "expired",
+          message: "⏰ انتهت صلاحية اشتراكك في قاعدة البيانات",
+          expiryDate: match.expiry_date,
+        });
+      }
+
+      // Check expiry date with 5-minute clock drift margin
       if (match.expiry_date) {
         const expiryTime = new Date(match.expiry_date).getTime();
-        if (!isNaN(expiryTime) && expiryTime <= Date.now()) {
+        if (!isNaN(expiryTime) && Date.now() > expiryTime + 5 * 60 * 1000) {
           db.toggleRunning(deviceId, false);
           return res.json({
             isValid: false,
@@ -203,23 +215,32 @@ async function startServer() {
         }
       }
 
-      // Check device binding
+      // Check device binding with support for multiple device identifiers (partition ID & VIP hardware fingerprint)
       const matchDevice = (match.used_by || "").trim();
       const clientDevice = (req.query.deviceId || req.body?.deviceId || deviceId || "").toString().trim();
-      if (
-        matchDevice &&
-        matchDevice !== "" &&
-        matchDevice !== clientDevice &&
-        db.sanitizeDeviceId(matchDevice) !== db.sanitizeDeviceId(clientDevice)
-      ) {
-        db.toggleRunning(deviceId, false);
-        return res.json({
-          isValid: false,
-          valid: false,
-          reason: "device_mismatch",
-          message: "⚠️ كود الترخيص مرتبط بجوال أو جهاز آخر",
-          usedBy: match.used_by,
-        });
+      const vipHeader = (req.headers["x-vip-device-id"] || req.query.vipDeviceId || req.body?.vipDeviceId || "").toString().trim();
+
+      if (matchDevice && matchDevice !== "") {
+        const matchFound =
+          matchDevice === clientDevice ||
+          matchDevice.toUpperCase() === clientDevice.toUpperCase() ||
+          db.sanitizeDeviceId(matchDevice) === db.sanitizeDeviceId(clientDevice) ||
+          (vipHeader !== "" && (
+            matchDevice === vipHeader ||
+            matchDevice.toUpperCase() === vipHeader.toUpperCase() ||
+            db.sanitizeDeviceId(matchDevice) === db.sanitizeDeviceId(vipHeader)
+          ));
+
+        if (!matchFound) {
+          db.toggleRunning(deviceId, false);
+          return res.json({
+            isValid: false,
+            valid: false,
+            reason: "device_mismatch",
+            message: "⚠️ كود الترخيص مرتبط بجوال أو جهاز آخر",
+            usedBy: match.used_by,
+          });
+        }
       }
 
       let remainingHours: number | undefined = undefined;
